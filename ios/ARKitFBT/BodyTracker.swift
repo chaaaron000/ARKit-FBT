@@ -23,6 +23,9 @@ final class BodyTracker: NSObject, ObservableObject, ARSessionDelegate {
     @Published private(set) var problemText: String?
     @Published private(set) var discoveryText: String?
     @Published private(set) var phoneAddress: String?
+    @Published private(set) var videoFormatText = "-"
+    @Published private(set) var supportedFormatsText = "-"
+    private var lowResCamera = true
 
     private weak var arView: ARView?
     private let sender = UDPSender()
@@ -132,11 +135,33 @@ final class BodyTracker: NSObject, ObservableObject, ARSessionDelegate {
         restartSession()
     }
 
+    /// true면 가장 높은 fps 중 가장 낮은 해상도를 고른다 (발열↓). false면 같은 fps 중 가장 높은 해상도.
+    func setLowResCamera(_ value: Bool) {
+        guard value != lowResCamera else { return }
+        lowResCamera = value
+        restartSession()
+    }
+
     func restartSession() {
         guard ARBodyTrackingConfiguration.isSupported, let view = arView else { return }
         let config = ARBodyTrackingConfiguration()
         config.automaticSkeletonScaleEstimationEnabled = true
+
+        let formats = ARBodyTrackingConfiguration.supportedVideoFormats
+        supportedFormatsText = formats.map(BodyTracker.describe).joined(separator: ", ")
+        let maxFps = formats.map { $0.framesPerSecond }.max() ?? 30
+        let candidates = formats.filter { $0.framesPerSecond == maxFps }
+        let area: (ARConfiguration.VideoFormat) -> CGFloat = { $0.imageResolution.width * $0.imageResolution.height }
+        let chosen = lowResCamera ? candidates.min { area($0) < area($1) } : candidates.max { area($0) < area($1) }
+        if let chosen {
+            config.videoFormat = chosen
+        }
+        videoFormatText = BodyTracker.describe(config.videoFormat)
         view.session.run(config, options: [.resetTracking, .removeExistingAnchors])
+    }
+
+    private static func describe(_ f: ARConfiguration.VideoFormat) -> String {
+        "\(Int(f.imageResolution.width))x\(Int(f.imageResolution.height))@\(f.framesPerSecond)"
     }
 
     // MARK: - ARSessionDelegate

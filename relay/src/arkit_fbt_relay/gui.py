@@ -142,11 +142,12 @@ class MainWindow(QtWidgets.QMainWindow):
             w.valueChanged.connect(lambda v: self.engine.update_settings(**{attr: v}))
             return w
 
-        form.addRow("위치 안정도", slider("min_cutoff", 0.05, 5.0, "낮을수록 떨림↓ 지연↑"))
-        form.addRow("위치 반응성", slider("beta", 0.0, 3.0, "높을수록 빠른 동작에서 지연↓ 떨림↑"))
+        form.addRow("위치 안정도", slider("min_cutoff", 0.05, 8.0, "낮을수록 떨림↓ 지연↑ (기본 3.0)"))
+        form.addRow("위치 반응성", slider("beta", 0.0, 8.0, "높을수록 빠른 동작에서 지연↓ 떨림↑ (기본 3.0)"))
         form.addRow("회전 안정도", slider("rot_min_cutoff", 0.05, 5.0, "낮을수록 떨림↓ 지연↑"))
         form.addRow("회전 반응성", slider("rot_beta", 0.0, 3.0, "높을수록 지연↓ 떨림↑"))
-        form.addRow("튐 제거 속도(m/s)", slider("max_speed", 2.0, 15.0, "이보다 빠른 순간 이동은 무시"))
+        form.addRow("튐 제거 속도(m/s)", slider("max_speed", 2.0, 30.0,
+                                                 "이보다 빠른 순간 이동은 무시. 너무 낮으면 빠르게 움직이는 발이 멈칫합니다 (기본 20)"))
         form.addRow("예측 (ms)", slider("prediction_ms", 0.0, 120.0,
                                          "움직이는 방향으로 미리 내다봐서 지연을 줄입니다. 크면 동작이 튀어나갑니다 (0 = 끔)"))
 

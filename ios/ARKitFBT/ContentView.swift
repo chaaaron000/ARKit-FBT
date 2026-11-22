@@ -33,6 +33,7 @@ struct ContentView: View {
     @AppStorage("relayPort") private var port = WireProtocol.defaultPort
     @AppStorage("sendEnabled") private var sendEnabled = true
     @AppStorage("autoDiscover") private var autoDiscover = true
+    @AppStorage("lowResCamera") private var lowResCamera = true
     @State private var showSettings = false
 
     var body: some View {
@@ -63,6 +64,7 @@ struct ContentView: View {
             }
             .onAppear {
                 UIApplication.shared.isIdleTimerDisabled = true
+                tracker.setLowResCamera(lowResCamera)
                 apply()
                 // 3초 안에 PC를 못 찾으면 설정을 한 번 열어 준다. 입력 중에는 닫히지 않는다 ("닫기"로만 닫힘).
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
@@ -73,6 +75,7 @@ struct ContentView: View {
             .onChange(of: port) { _ in apply() }
             .onChange(of: sendEnabled) { _ in apply() }
             .onChange(of: autoDiscover) { _ in apply() }
+            .onChange(of: lowResCamera) { value in tracker.setLowResCamera(value) }
         } else {
             VStack(spacing: 12) {
                 Image(systemName: "exclamationmark.triangle").font(.largeTitle)
@@ -152,6 +155,10 @@ struct ContentView: View {
             Text("이 iPhone의 Wi-Fi 주소: \(tracker.phoneAddress ?? "없음 (Wi-Fi 꺼짐?)")")
                 .font(.caption)
                 .foregroundColor(.white.opacity(0.8))
+            Toggle("저해상도 카메라 (발열↓)", isOn: $lowResCamera)
+            Text("카메라: \(tracker.videoFormatText)  ·  지원: \(tracker.supportedFormatsText)")
+                .font(.caption2)
+                .foregroundColor(.white.opacity(0.7))
             if !tracker.missingJoints.isEmpty {
                 Text("찾지 못한 관절: \(tracker.missingJoints.joined(separator: ", "))")
                     .font(.caption2)

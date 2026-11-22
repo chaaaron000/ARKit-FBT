@@ -39,14 +39,15 @@ UP = np.array([0.0, 1.0, 0.0])
 @dataclass
 class Settings:
     enabled_trackers: list[str] = field(default_factory=lambda: ["hip", "left_foot", "right_foot"])
-    # 위치 필터
-    min_cutoff: float = 1.5
-    beta: float = 0.7
+    # 위치 필터 (2026-11-22 iPhone XR 실측 녹화로 고른 값: 원본 대비 떨림 절반, 오차도 감소)
+    min_cutoff: float = 3.0
+    beta: float = 3.0
     # 회전 필터
     rot_min_cutoff: float = 1.0
     rot_beta: float = 0.3
-    # 한 프레임 이동 속도가 이보다 빠르면 오인식으로 보고 잠깐 무시 (m/s)
-    max_speed: float = 6.0
+    # 한 프레임 이동 속도가 이보다 빠르면 오인식으로 보고 잠깐 무시 (m/s).
+    # 걷거나 발을 찰 때 발은 실제로 6m/s 이상 나오므로, 순간이동 수준만 거른다.
+    max_speed: float = 20.0
     # 지연을 줄이기 위해 속도 방향으로 미리 내다보는 시간 (ms). 크면 동작이 튀어나간다.
     prediction_ms: float = 0.0
     stabilize_camera: bool = True
