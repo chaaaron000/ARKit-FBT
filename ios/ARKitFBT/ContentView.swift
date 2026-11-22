@@ -42,7 +42,7 @@ struct ContentView: View {
 
                 VStack(spacing: 8) {
                     statusBar
-                    if showSettings || host.isEmpty {
+                    if showSettings {
                         settingsPanel
                     }
                     Spacer()
@@ -54,6 +54,8 @@ struct ContentView: View {
             }
             .onAppear {
                 UIApplication.shared.isIdleTimerDisabled = true
+                // 주소가 없으면 처음에 한 번 열어 준다. 입력 중에는 닫히지 않는다 ("닫기"로만 닫힘).
+                if host.isEmpty { showSettings = true }
                 apply()
             }
             .onChange(of: host) { _ in apply() }
