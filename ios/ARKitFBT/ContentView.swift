@@ -13,6 +13,20 @@ struct ARViewContainer: UIViewRepresentable {
     func updateUIView(_ uiView: ARView, context: Context) {}
 }
 
+/// 반투명 검은 패널 위에서 잘 보이는 입력칸 (시스템 라이트/다크 모드와 무관).
+struct DarkField: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .font(.body.monospacedDigit())
+            .foregroundColor(.white)
+            .tint(.cyan)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(Color.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.35), lineWidth: 1))
+    }
+}
+
 struct ContentView: View {
     @StateObject private var tracker = BodyTracker()
     @AppStorage("relayHost") private var host = ""
@@ -97,14 +111,14 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("PC 중계 프로그램").font(.headline)
             HStack {
-                TextField("PC IP (예: 192.168.0.2)", text: $host)
+                TextField("", text: $host, prompt: Text("PC IP (예: 192.168.0.2)").foregroundColor(.white.opacity(0.5)))
                     .keyboardType(.numbersAndPunctuation)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
-                    .textFieldStyle(.roundedBorder)
-                TextField("포트", value: $port, format: .number.grouping(.never))
+                    .modifier(DarkField())
+                TextField("", value: $port, format: .number.grouping(.never), prompt: Text("포트").foregroundColor(.white.opacity(0.5)))
                     .keyboardType(.numberPad)
-                    .textFieldStyle(.roundedBorder)
+                    .modifier(DarkField())
                     .frame(width: 80)
             }
             Toggle("데이터 전송", isOn: $sendEnabled)
