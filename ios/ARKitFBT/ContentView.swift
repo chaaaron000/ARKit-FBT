@@ -43,6 +43,14 @@ struct ContentView: View {
 
                 VStack(spacing: 8) {
                     statusBar
+                    if !tracker.pcConnected, let problem = tracker.problemText {
+                        Label(problem, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption.bold())
+                            .foregroundColor(.yellow)
+                            .padding(8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 10))
+                    }
                     if showSettings {
                         settingsPanel
                     }
@@ -123,6 +131,9 @@ struct ContentView: View {
                 } else {
                     Label("같은 Wi-Fi에서 PC를 찾는 중…", systemImage: "magnifyingglass").font(.callout)
                 }
+                if let d = tracker.discoveryText {
+                    Text(d).font(.caption2).foregroundColor(.orange)
+                }
                 Text("못 찾으면 아래에 PC 주소를 직접 입력하세요").font(.caption2).foregroundColor(.white.opacity(0.7))
             }
             HStack {
@@ -138,6 +149,9 @@ struct ContentView: View {
             }
             Toggle("데이터 전송", isOn: $sendEnabled)
             Text("상태: \(tracker.connectionText)").font(.caption)
+            Text("이 iPhone의 Wi-Fi 주소: \(tracker.phoneAddress ?? "없음 (Wi-Fi 꺼짐?)")")
+                .font(.caption)
+                .foregroundColor(.white.opacity(0.8))
             if !tracker.missingJoints.isEmpty {
                 Text("찾지 못한 관절: \(tracker.missingJoints.joined(separator: ", "))")
                     .font(.caption2)

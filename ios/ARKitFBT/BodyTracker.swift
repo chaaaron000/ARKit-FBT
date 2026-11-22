@@ -19,6 +19,10 @@ final class BodyTracker: NSObject, ObservableObject, ARSessionDelegate {
     @Published private(set) var discoveredNames: [String] = []
     /// 지금 자동 찾기로 연결된 PC 이름 (수동 주소를 쓰면 nil)
     @Published private(set) var autoTargetName: String?
+    /// 연결이 안 될 때 원인 (권한, VPN, 전송 실패 등)
+    @Published private(set) var problemText: String?
+    @Published private(set) var discoveryText: String?
+    @Published private(set) var phoneAddress: String?
 
     private weak var arView: ARView?
     private let sender = UDPSender()
@@ -58,7 +62,11 @@ final class BodyTracker: NSObject, ObservableObject, ARSessionDelegate {
             self.updateConnection()
         }
         browser.onState = { [weak self] text in
-            self?.connectionText = text
+            self?.discoveryText = text
+        }
+        sender.onProblem = { [weak self] text in
+            guard let self, self.problemText != text else { return }
+            self.problemText = text
         }
         statusTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             self?.tickStatus()
@@ -206,6 +214,8 @@ final class BodyTracker: NSObject, ObservableObject, ARSessionDelegate {
         }
         if relayStatus != ack.status { relayStatus = ack.status }
         if !pcConnected { pcConnected = true }
+        if problemText != nil { problemText = nil }
+        if discoveryText != nil { discoveryText = nil }
     }
 
     private func tickStatus() {
@@ -213,6 +223,8 @@ final class BodyTracker: NSObject, ObservableObject, ARSessionDelegate {
         let connected = lastAckTime > 0 && now - lastAckTime < 2.0
         if connected != pcConnected { pcConnected = connected }
         if !connected { rttMs = 0 }
+        let addr = LocalAddress.wifi()
+        if addr != phoneAddress { phoneAddress = addr }
 
         let text: String
         switch ProcessInfo.processInfo.thermalState {
