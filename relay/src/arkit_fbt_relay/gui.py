@@ -12,7 +12,7 @@ import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from .engine import Engine
-from .pipeline import TRACKERS
+from .pipeline import FOOT_LOCK_MODES, TRACKERS, Settings, foot_lock_status
 from .preview import display_rotation, framing_warnings
 from .protocol import BONES, JOINT_NAMES
 
@@ -116,7 +116,7 @@ class MainWindow(QtWidgets.QMainWindow):
             ("ip", "이 PC 주소"), ("phone", "iPhone"), ("rate", "수신 속도"),
             ("jitter", "수신 간격 흔들림"), ("lost", "손실 / 오류"), ("tracked", "몸 인식"),
             ("facing", "카메라 정면"), ("yaw", "방향 정렬"), ("lean", "자세 기울기 보정"),
-            ("gate", "불안정해서 고정 중"), ("quality", "ARKit 추적 품질 (3초)"),
+            ("gate", "불안정해서 고정 중"), ("foot", "발 고정"), ("quality", "ARKit 추적 품질 (3초)"),
             ("gesture", "손 들기 제스처"),
             ("osc", "VRChat 전송"),
         ]
@@ -192,6 +192,17 @@ class MainWindow(QtWidgets.QMainWindow):
 
         check("osc_enabled", "VRChat으로 전송")
         check("quality_gate", "불안정할 때 고정 (ARKit이 몸을 놓치면 마지막 안정 자세 유지)")
+        check("foot_lock", "발 고정 (디딘 발을 바닥에 고정해 서 있을 때 발 떨림 제거)",
+              "발이 바닥 높이에 있고 거의 안 움직이면 그 자리에 고정합니다. 발을 들면 풀려서 따라갑니다")
+        mode = QtWidgets.QComboBox()
+        for key, text in FOOT_LOCK_MODES.items():
+            mode.addItem(text, key)
+        mode.setCurrentIndex(max(0, mode.findData(s.foot_lock_mode)))
+        mode.setToolTip("움직임 우선: 바닥에서 발을 끌거나 작게 디디는 움직임도 따라갑니다 (서 있을 때 몇 cm 떨림이 남음)\n"
+                        "정지 안정 우선: 서 있을 때 더 단단히 고정합니다. 발을 들지 않고 20cm 안에서 끄는 움직임은 무시합니다\n"
+                        "실행 중에 바꿔도 됩니다 (고정을 부드럽게 풀었다가 새 방식으로 다시 고정)")
+        mode.currentIndexChanged.connect(lambda _i: self.engine.update_settings(foot_lock_mode=mode.currentData()))
+        form.addRow("발 고정 방식", mode)
         check("lock_yaw_to_camera", "몸 방향을 카메라 정면으로 고정 (허리 회전 안정화)",
               "ARKit 몸 방향 추정은 자주 틀어집니다. 끄면 ARKit 방향을 따르지만 허리가 흔들릴 수 있습니다")
         check("upright_correction", "자세 기울기 보정 (카메라 쪽으로 기우는 오차 제거)")
@@ -232,6 +243,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if not path:
             return
         self.export_button.setEnabled(False)
+        # 지금 GUI 설정(트래커·발 고정 방식 등)으로 다시 처리한다. 녹화에는 설정 이력이 없어 녹화 당시 보낸 값과는
+        # 다를 수 있다. 내보내는 동안 설정을 바꿔도 섞이지 않게 복사해 둔다.
+        settings = Settings.from_dict(self.engine.settings.to_dict())
         self.engine.log(f"영상 만드는 중: {Path(path).name} (녹화 길이에 따라 수십 초 걸립니다)")
 
         def work() -> None:
@@ -245,7 +259,7 @@ class MainWindow(QtWidgets.QMainWindow):
                         last[0] = step
                         self.engine.log(f"영상 만드는 중… {f * 100:.0f}%")
 
-                out = export_video(Path(path), progress=progress)
+                out = export_video(Path(path), settings=settings, progress=progress)
                 self.engine.log(f"영상 저장: {out}")
                 import subprocess
                 subprocess.Popen(["explorer", "/select,", str(out)])
@@ -359,6 +373,8 @@ class MainWindow(QtWidgets.QMainWindow):
                       "left_upLeg_joint": "왼허벅지", "right_upLeg_joint": "오른허벅지"})
         gated = [names.get(g, g) for g in snap.gated]
         mark(st["gate"], not gated, ", ".join(gated) if gated else "없음")
+        st["foot"].setText(foot_lock_status(self.engine.settings, snap.foot_locked, snap.floor_ready))
+        st["foot"].setStyleSheet(ok if snap.foot_locked else "")
         q = snap.track_quality
         mark(st["quality"], q is not None and q >= 0.9, "-" if q is None else f"{q * 100:.0f}%")
         if snap.lean_deg is not None:

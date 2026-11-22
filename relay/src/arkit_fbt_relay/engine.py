@@ -43,6 +43,9 @@ class Snapshot:
     last_yaw: float | None = None
     lean_deg: float | None = None
     gated: list[str] = field(default_factory=list)
+    # 발 고정 중인 트래커 이름 ("left_foot", "right_foot"), 바닥 높이를 추정했는지
+    foot_locked: list[str] = field(default_factory=list)
+    floor_ready: bool = False
     # 최근 3초 동안 ARKit이 21개 관절을 모두 '추적 중'으로 표시한 프레임 비율 (0~1)
     track_quality: float | None = None
     gesture_progress: float = 0.0
@@ -169,7 +172,7 @@ class Engine:
         with self._lock:
             for k, v in changes.items():
                 setattr(self.settings, k, v)
-            self.processor.apply_filter_settings()
+            self.processor.apply_settings()  # 발 고정 켜기·끄기는 패킷 없이 연달아 바꿔도 각각 반영한다
 
     def snapshot(self) -> Snapshot:
         now = time.monotonic()
@@ -200,6 +203,8 @@ class Engine:
                 last_yaw=self._last_yaw,
                 lean_deg=self.processor.lean_deg,
                 gated=sorted(self.processor.gated) if alive else [],
+                foot_locked=sorted(self.processor.foot_locked) if alive else [],
+                floor_ready=self.processor.floor_y is not None,
                 track_quality=quality,
                 gesture_progress=self._gesture_progress,
                 osc_sent=self.osc.sent,

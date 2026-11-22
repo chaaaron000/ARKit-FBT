@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .pipeline import TRACKERS, FrameOut, Processor, Settings
+from .pipeline import TRACKERS, FrameOut, Processor, Settings, foot_lock_status
 from .preview import Preview, Reassembler, display_rotation, is_preview_chunk
 from .protocol import BONES, JOINT_NAMES, ProtocolError, parse_frame
 from .recording import read_records
@@ -142,17 +142,22 @@ def _render(QtGui, QtCore, t: float, preview: Preview | None, state: FrameOut | 
     if state is not None and state.tracked:
         gated = [GATE_LABELS.get(g, g) for g in sorted(proc.gated)]
         lines.append("고정 중: " + (", ".join(gated) if gated else "없음"))
+        lines.append("발 고정: " + foot_lock_status(proc.settings, proc.foot_locked, proc.floor_y is not None))
         lines.append(f"자세 기울기 보정: {proc.lean_deg:.1f}°" if proc.lean_deg is not None else "자세 기울기 보정: -")
         lines.append(f"카메라 정면: {state.facing:+.2f}")
     else:
         lines.append("몸 인식 안 됨")
     for i, line in enumerate(lines):
-        color = "#ffd166" if line.startswith("고정 중") and not line.endswith("없음") else "#c8c8c8"
+        color = "#c8c8c8"
+        if line.startswith("고정 중") and not line.endswith("없음"):
+            color = "#ffd166"
+        elif line.startswith("발 고정") and proc.foot_locked:
+            color = "#2ec4b6"
         p.setPen(QtGui.QColor(color))
         p.drawText(x0, 64 + i * 24, line)
 
     if state is not None and state.tracked and state.head_pos is not None:
-        _draw_output(QtGui, QtCore, p, state, x0, 170)
+        _draw_output(QtGui, QtCore, p, state, x0, 64 + len(lines) * 24, proc.foot_locked)
     p.end()
     return img
 
@@ -178,8 +183,8 @@ def _draw_raw_skeleton(QtGui, QtCore, img, joints) -> None:
     p.end()
 
 
-def _draw_output(QtGui, QtCore, p, state: FrameOut, x0: int, y0: int) -> None:
-    """머리를 원점으로, VRChat이 받는 트래커 위치를 정면(X-Y)과 위(X-Z)에서 그린다."""
+def _draw_output(QtGui, QtCore, p, state: FrameOut, x0: int, y0: int, locked=frozenset()) -> None:
+    """머리를 원점으로, VRChat이 받는 트래커 위치를 정면(X-Y)과 위(X-Z)에서 그린다. 고정된 발은 굵은 테두리."""
     head = np.asarray(state.head_pos)
     fwd = state.forward if state.forward is not None else np.array([0.0, 0.0, 1.0])
     # 몸 정면 기준 좌표로 돌려서 그린다 (몸이 돌아도 그림은 정면)
@@ -211,7 +216,8 @@ def _draw_output(QtGui, QtCore, p, state: FrameOut, x0: int, y0: int) -> None:
             pt = QtCore.QPointF(cx + lx * scale, cy - ly * scale) if col == 0 else \
                 QtCore.QPointF(cx + lx * scale, cy - lz * scale)
             p.setBrush(QtGui.QColor(TRACKER_COLORS.get(t.name, "#ccc")))
-            p.setPen(QtGui.QPen(QtGui.QColor("white"), 1))
+            locked_foot = t.name in locked
+            p.setPen(QtGui.QPen(QtGui.QColor("#b8ff3c" if locked_foot else "white"), 3 if locked_foot else 1))
             p.drawEllipse(pt, 9, 9)
         # 1m 눈금
         p.setPen(QtGui.QColor("#444"))
