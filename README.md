@@ -47,12 +47,15 @@ uv run arkit-fbt-relay
 | 튐 제거 속도 | 이보다 빠른 순간 이동은 오인식으로 보고 무시합니다. |
 
 ### 녹화와 분석
-창의 **● 녹화 시작** 버튼을 누르면 iPhone에서 오는 원본 데이터가 `relay/recordings/`에 저장됩니다. 녹화 파일로 실제 떨림, 지연 변동, 관절 인식률을 확인하고, 같은 동작을 반복 재생하면서 튜닝할 수 있습니다.
+창의 **● 녹화 시작** 버튼을 누르면 iPhone에서 오는 원본 데이터와 **카메라 미리보기(초당 8장)**가 `relay/recordings/`에 저장됩니다. 녹화 파일로 실제 떨림, 지연 변동, 관절 인식률을 확인하고, 같은 동작을 반복 재생하면서 튜닝할 수 있습니다.
+
+**🎬 녹화 → 영상(MP4)** 버튼을 누르면 녹화를 MP4로 만들어 줍니다. 왼쪽에는 카메라 화면과 ARKit 뼈대, 오른쪽에는 VRChat이 실제로 받는 자세와 상태(추적 관절 수, 고정 중인 관절)가 나옵니다.
 
 ```powershell
 cd relay
-uv run python -m arkit_fbt_relay.recording analyze recordings\<파일>.afbtrec   # 분석 리포트
-uv run python -m arkit_fbt_relay.recording replay  recordings\<파일>.afbtrec   # 중계 프로그램으로 다시 재생
+uv run python -m arkit_fbt_relay.recording analyze      recordings\<파일>.afbtrec  # 분석 리포트
+uv run python -m arkit_fbt_relay.recording replay       recordings\<파일>.afbtrec  # 중계 프로그램으로 다시 재생
+uv run python -m arkit_fbt_relay.recording export-video recordings\<파일>.afbtrec  # MP4로 내보내기
 ```
 
 ## 2. iPhone 앱 설치

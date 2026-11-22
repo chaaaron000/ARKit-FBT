@@ -74,6 +74,8 @@ def analyze(path: Path) -> str:
     """녹화 파일에서 튜닝에 필요한 숫자를 뽑는다."""
     recv_t, frames, bad = [], [], 0
     for t, data in read_records(path):
+        if data[:4] != b"AFBT":  # 카메라 미리보기 조각 등
+            continue
         try:
             frames.append(parse_frame(data))
             recv_t.append(t)
@@ -181,9 +183,19 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--port", type=int, default=DEFAULT_PORT)
     r.add_argument("--speed", type=float, default=1.0)
     r.add_argument("--loop", action="store_true")
+    v = sub.add_parser("export-video", help="카메라 영상 + VRChat이 받는 자세를 MP4로")
+    v.add_argument("file", type=Path)
+    v.add_argument("-o", "--out", type=Path)
+    v.add_argument("--fps", type=float, default=15.0)
     args = ap.parse_args(argv)
     if args.cmd == "analyze":
         print(analyze(args.file))
+        return 0
+    if args.cmd == "export-video":
+        from .video import export_video
+        out = export_video(args.file, args.out, args.fps,
+                           progress=lambda f: print(f"\r영상 만드는 중 {f * 100:3.0f}%", end="", flush=True))
+        print(f"\n저장: {out}")
         return 0
     return replay(args.file, args.host, args.port, args.speed, args.loop)
 

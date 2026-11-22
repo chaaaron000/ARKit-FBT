@@ -90,6 +90,9 @@ class Engine:
         self._recorder: Recorder | None = None
         # GUI가 켜져 있을 때 iPhone에 카메라 미리보기를 요청한다
         self.want_preview = False
+        # 녹화 중에는 미리보기를 함께 저장한다 (나중에 영상으로 내보내기)
+        self.record_video = True
+        self.last_recording: Path | None = None
         self._reassembler = Reassembler()
         self._preview: Preview | None = None
 
@@ -130,6 +133,7 @@ class Engine:
         if rec is None:
             return None
         rec.close()
+        self.last_recording = rec.path
         self.log(f"녹화 저장: {rec.path} ({rec.count}개, {time.monotonic() - rec.started:.0f}초)")
         return rec.path
 
@@ -217,18 +221,23 @@ class Engine:
             except Exception as e:  # 루프가 죽지 않도록
                 self.log(f"처리 오류: {e!r}")
 
+    @property
+    def _preview_needed(self) -> bool:
+        return self.want_preview or (self._recorder is not None and self.record_video)
+
     def handle_packet(self, data: bytes, addr: tuple[str, int]) -> None:
         now = time.monotonic()
-        if is_preview_chunk(data):
+        preview_chunk = is_preview_chunk(data)
+        with self._lock:
+            if self._recorder is not None and (not preview_chunk or self.record_video):
+                self._recorder.write(now, data)
+        if preview_chunk:
             if self.want_preview:
                 preview = self._reassembler.add(data)
                 if preview is not None:
                     with self._lock:
                         self._preview = preview
             return
-        with self._lock:
-            if self._recorder is not None:
-                self._recorder.write(now, data)
         try:
             frame = parse_frame(data)
         except ProtocolError as e:
@@ -277,7 +286,7 @@ class Engine:
             s |= STATUS_YAW_ALIGNED
         if self.dry_run:
             s |= STATUS_DRY_RUN
-        if self.want_preview:
+        if self._preview_needed:
             s |= STATUS_WANT_PREVIEW
         return s
 

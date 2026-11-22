@@ -9,6 +9,7 @@ dependencies = [
     "PySide6-Essentials>=6.6",
     "pyqtgraph>=0.13.7",
     "zeroconf>=0.131",
+    "imageio-ffmpeg>=0.5",
 ]
 
 [project.scripts]

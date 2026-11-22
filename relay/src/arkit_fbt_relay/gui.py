@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -54,9 +55,12 @@ class FloatSlider(QtWidgets.QWidget):
 
 
 class MainWindow(QtWidgets.QMainWindow):
+    exportFinished = QtCore.Signal()
+
     def __init__(self, engine: Engine, ips: list[str], save: Callable[[], None],
                  recordings_dir: Path = Path("recordings")):
         super().__init__()
+        self.exportFinished.connect(lambda: self.export_button.setEnabled(True))
         self.engine = engine
         self.save = save
         self.recordings_dir = recordings_dir
@@ -208,13 +212,47 @@ class MainWindow(QtWidgets.QMainWindow):
         b3 = QtWidgets.QPushButton("설정 저장")
         b3.clicked.connect(self._save)
         self.rec_button = QtWidgets.QPushButton("● 녹화 시작")
-        self.rec_button.setToolTip("iPhone에서 오는 원본 데이터를 파일로 저장합니다 (분석/튜닝용)")
+        self.rec_button.setToolTip("iPhone에서 오는 원본 데이터와 카메라 미리보기를 파일로 저장합니다 (분석/튜닝용)")
         self.rec_button.clicked.connect(self._toggle_recording)
+        self.export_button = QtWidgets.QPushButton("🎬 녹화 → 영상(MP4)")
+        self.export_button.setToolTip("녹화 파일을 카메라 영상 + VRChat이 받는 자세가 담긴 MP4로 만듭니다")
+        self.export_button.clicked.connect(self._export_video)
         lay.addWidget(b1, 0, 0)
         lay.addWidget(b2, 0, 1)
         lay.addWidget(self.rec_button, 1, 0)
-        lay.addWidget(b3, 1, 1)
+        lay.addWidget(self.export_button, 1, 1)
+        lay.addWidget(b3, 2, 0, 1, 2)
         return box
+
+    def _export_video(self) -> None:
+        start = str(self.engine.last_recording or self.recordings_dir)
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "영상으로 만들 녹화 파일", start, "녹화 (*.afbtrec)")
+        if not path:
+            return
+        self.export_button.setEnabled(False)
+        self.engine.log(f"영상 만드는 중: {Path(path).name} (녹화 길이에 따라 수십 초 걸립니다)")
+
+        def work() -> None:
+            try:
+                from .video import export_video
+                last = [-1]
+
+                def progress(f: float) -> None:
+                    step = int(f * 4)
+                    if step != last[0]:
+                        last[0] = step
+                        self.engine.log(f"영상 만드는 중… {f * 100:.0f}%")
+
+                out = export_video(Path(path), progress=progress)
+                self.engine.log(f"영상 저장: {out}")
+                import subprocess
+                subprocess.Popen(["explorer", "/select,", str(out)])
+            except Exception as e:  # 버튼이 다시 살아나도록
+                self.engine.log(f"영상 만들기 실패: {e!r}")
+            finally:
+                self.exportFinished.emit()  # 다른 스레드에서 보내도 GUI 스레드에서 처리된다
+
+        threading.Thread(target=work, name="video-export", daemon=True).start()
 
     def _toggle_recording(self) -> None:
         if self.engine.recording is None:
