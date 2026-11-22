@@ -6,6 +6,8 @@ __pycache__/
 relay/config.json
 relay/recordings/
 *.afbtrec
+*.etl
+cap*.txt
 
 # iOS (XcodeGen이 생성)
 ios/*.xcodeproj/
