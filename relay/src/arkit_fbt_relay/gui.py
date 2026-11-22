@@ -71,13 +71,19 @@ class MainWindow(QtWidgets.QMainWindow):
         root = QtWidgets.QHBoxLayout(central)
         self.setCentralWidget(central)
 
-        left = QtWidgets.QVBoxLayout()
-        root.addLayout(left, 0)
+        left_widget = QtWidgets.QWidget()
+        left = QtWidgets.QVBoxLayout(left_widget)
         left.addWidget(self._status_box(ips))
         left.addWidget(self._tracker_box())
-        left.addWidget(self._tuning_box())
         left.addWidget(self._action_box())
+        left.addWidget(self._tuning_box())
         left.addStretch(1)
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidget(left_widget)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setMinimumWidth(500)
+        root.addWidget(scroll, 0)
 
         right = QtWidgets.QVBoxLayout()
         root.addLayout(right, 1)
@@ -105,7 +111,8 @@ class MainWindow(QtWidgets.QMainWindow):
         rows = [
             ("ip", "이 PC 주소"), ("phone", "iPhone"), ("rate", "수신 속도"),
             ("jitter", "수신 간격 흔들림"), ("lost", "손실 / 오류"), ("tracked", "몸 인식"),
-            ("facing", "카메라 정면"), ("yaw", "방향 정렬"), ("gesture", "손 들기 제스처"),
+            ("facing", "카메라 정면"), ("yaw", "방향 정렬"), ("lean", "자세 기울기 보정"),
+            ("gesture", "손 들기 제스처"),
             ("osc", "VRChat 전송"),
         ]
         for key, title in rows:
@@ -146,10 +153,29 @@ class MainWindow(QtWidgets.QMainWindow):
         form.addRow("위치 반응성", slider("beta", 0.0, 8.0, "높을수록 빠른 동작에서 지연↓ 떨림↑ (기본 3.0)"))
         form.addRow("회전 안정도", slider("rot_min_cutoff", 0.05, 5.0, "낮을수록 떨림↓ 지연↑"))
         form.addRow("회전 반응성", slider("rot_beta", 0.0, 3.0, "높을수록 지연↓ 떨림↑"))
-        form.addRow("튐 제거 속도(m/s)", slider("max_speed", 2.0, 30.0,
-                                                 "이보다 빠른 순간 이동은 무시. 너무 낮으면 빠르게 움직이는 발이 멈칫합니다 (기본 20)"))
+        form.addRow("깊이 방향 필터 비율", slider("depth_ratio", 0.05, 1.0,
+                                                "카메라 앞뒤 방향만 더 강하게 거릅니다. 낮을수록 앞뒤 흔들림↓ (기본 0.2, 1 = 같게)"))
+        form.addRow("관절 최대 속도(m/s)", slider("max_rel_speed", 0.0, 10.0,
+                                               "골반 기준으로 이보다 빠른 움직임은 잘라 튐을 누릅니다. "
+                                               "낮으면 빠른 발차기가 늦게 따라옵니다 (기본 3, 0 = 끔)"))
+        form.addRow("몸 전체 순간이동 무시(m/s)", slider("max_speed", 2.0, 30.0, "몸 전체가 이보다 빠르게 이동하면 무시 (기본 20)"))
         form.addRow("예측 (ms)", slider("prediction_ms", 0.0, 120.0,
                                          "움직이는 방향으로 미리 내다봐서 지연을 줄입니다. 크면 동작이 튀어나갑니다 (0 = 끔)"))
+
+        spike = QtWidgets.QCheckBox("순간 튐 제거 (3프레임 중앙값, 지연 +17ms)")
+        spike.setChecked(s.spike_window > 1)
+        spike.toggled.connect(lambda v: self.engine.update_settings(spike_window=3 if v else 1))
+        form.addRow(spike)
+
+        head = QtWidgets.QComboBox()
+        options = [("chest", "가슴 기준 (추천)"), ("neck", "목 기준"), ("head", "ARKit 머리 그대로")]
+        for key, text in options:
+            head.addItem(text, key)
+        keys = [k for k, _ in options]
+        head.setCurrentIndex(keys.index(s.head_horizontal) if s.head_horizontal in keys else 0)
+        head.setToolTip("헤드셋을 쓰면 ARKit이 머리를 앞으로 쏠리게 잡아 몸이 밀려 보입니다. 가슴 기준이 가장 정확했습니다.")
+        head.currentIndexChanged.connect(lambda _i: self.engine.update_settings(head_horizontal=head.currentData()))
+        form.addRow("머리 위치(수평)", head)
 
         def check(attr: str, text: str, tip: str = "") -> QtWidgets.QCheckBox:
             cb = QtWidgets.QCheckBox(text)
@@ -160,6 +186,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return cb
 
         check("osc_enabled", "VRChat으로 전송")
+        check("upright_correction", "자세 기울기 보정 (카메라 쪽으로 기우는 오차 제거)")
+        check("flat_feet", "발·무릎을 평평하게 (ARKit 발 각도 무시, 몸 방향만 따름)")
         check("send_head_position", "머리 위치 전송 (VRChat 자동 위치 정렬)", "끄면 트래커가 따로 놉니다")
         check("stabilize_camera", "카메라 고정 보정 (ARKit 드리프트 제거)")
         check("auto_yaw_on_start", "시작 시 자동 방향 정렬")
@@ -284,6 +312,11 @@ class MainWindow(QtWidgets.QMainWindow):
             mark(st["yaw"], True, f"{snap.last_yaw:.0f}° ({ago:.0f}초 전)")
         else:
             mark(st["yaw"], False, "아직 안 함")
+        if snap.lean_deg is not None:
+            mark(st["lean"], True, f"{snap.lean_deg:.1f}° 바로 세우는 중")
+        else:
+            mark(st["lean"], not self.engine.settings.upright_correction,
+                 "꺼짐" if not self.engine.settings.upright_correction else "전신이 보이면 시작")
         st["gesture"].setText("■" * round(snap.gesture_progress * 10) + "□" * (10 - round(snap.gesture_progress * 10)))
         osc_on = self.engine.settings.osc_enabled and not self.engine.dry_run
         mark(st["osc"], osc_on, f"{'켜짐' if osc_on else '꺼짐'} · {snap.osc_sent} msg"

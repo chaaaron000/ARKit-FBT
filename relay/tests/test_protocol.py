@@ -36,11 +36,14 @@ def test_not_tracked():
     assert not f.tracked and f.joints == {} and f.root is None
 
 
-def test_untracked_joint_is_dropped():
+def test_missing_and_untracked_joints():
     joints = synth_joints(0.0)
-    del joints["left_toes_joint"]
-    f = parse_frame(build_frame(1, 0.0, CAM, joints))
+    del joints["left_toes_joint"]  # 위치 자체가 없음 (NaN)
+    f = parse_frame(build_frame(1, 0.0, CAM, joints, untracked={"head_joint"}))
     assert "left_toes_joint" not in f.joints and "right_toes_joint" in f.joints
+    # 추적 안 됨 표시여도 추정 위치는 받되, tracked_joints 에서는 빠진다
+    assert "head_joint" in f.joints and "head_joint" not in f.tracked_joints
+    assert "hips_joint" in f.tracked_joints
 
 
 def test_rejects_garbage():

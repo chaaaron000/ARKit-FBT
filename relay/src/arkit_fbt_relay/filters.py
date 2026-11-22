@@ -59,6 +59,38 @@ class OneEuroFilter:
         return x_hat.copy()
 
 
+class AnisoFilter:
+    """한 축(카메라 깊이 방향)만 더 강하게 거르는 3D 위치 필터.
+
+    카메라 한 대로 추정한 위치는 깊이(카메라 시선) 방향 잡음이 좌우·상하보다 훨씬 크다.
+    """
+
+    def __init__(self) -> None:
+        self.along = OneEuroFilter()
+        self.perp = OneEuroFilter()
+
+    def reset(self) -> None:
+        self.along.reset()
+        self.perp.reset()
+
+    def __call__(self, v: np.ndarray, t: float, axis: np.ndarray, min_cutoff: float, beta: float,
+                 depth_ratio: float, prediction_s: float = 0.0, max_lead: float = 0.15) -> np.ndarray:
+        self.perp.min_cutoff, self.perp.beta = min_cutoff, beta
+        self.along.min_cutoff, self.along.beta = min_cutoff * depth_ratio, beta * depth_ratio
+        a = float(np.dot(v, axis))
+        p = v - a * axis
+        out = self.along(np.array([a]), t)[0] * axis + self.perp(p, t)
+        if prediction_s > 0:
+            va, vp = self.along.velocity, self.perp.velocity
+            if va is not None and vp is not None:
+                lead = (va[0] * axis + vp) * prediction_s
+                n = float(np.linalg.norm(lead))
+                if n > max_lead:
+                    lead *= max_lead / n
+                out = out + lead
+        return out
+
+
 class QuatOneEuroFilter:
     """쿼터니언 성분에 One Euro를 적용하고 다시 정규화한다 (작은 회전 변화에 충분히 정확)."""
 

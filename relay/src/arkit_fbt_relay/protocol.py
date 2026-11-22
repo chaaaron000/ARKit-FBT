@@ -65,7 +65,10 @@ class BodyFrame:
     scale: float
     camera: Pose
     root: Pose | None
+    # ARKit이 추정한 모든 관절 (추적 중이 아니어도 추정 위치가 온다)
     joints: dict[str, Pose] = field(default_factory=dict)
+    # 그중 ARKit이 '추적 중'이라고 표시한 관절 (None = 정보 없음, 전부 믿음)
+    tracked_joints: frozenset[str] | None = None
 
 
 def _read_pose(buf: bytes, offset: int) -> Pose | None:
@@ -100,13 +103,17 @@ def parse_frame(data: bytes) -> BodyFrame:
     if len(data) < offset + count * POSE.size:
         raise ProtocolError("관절 데이터가 잘림")
 
+    # 헤드셋을 쓰면 ARKit이 관절을 자주 '추적 중 아님'으로 표시하지만(실측 21% 프레임),
+    # 그때도 추정 위치는 쓸 만하다. 버리면 트래커가 멈췄다가 한꺼번에 튄다.
     joints: dict[str, Pose] = {}
+    tracked_joints: set[str] = set()
     for i in range(min(count, len(JOINT_NAMES))):
-        if not (mask >> i) & 1:
-            continue
         pose = _read_pose(data, offset + i * POSE.size)
-        if pose is not None:
-            joints[JOINT_NAMES[i]] = pose
+        if pose is None:
+            continue
+        joints[JOINT_NAMES[i]] = pose
+        if (mask >> i) & 1:
+            tracked_joints.add(JOINT_NAMES[i])
 
     return BodyFrame(
         seq=seq,
@@ -116,6 +123,7 @@ def parse_frame(data: bytes) -> BodyFrame:
         camera=camera,
         root=root,
         joints=joints,
+        tracked_joints=frozenset(tracked_joints),
     )
 
 
@@ -126,8 +134,9 @@ def build_frame(
     joints: dict[str, Pose] | None,
     root: Pose | None = None,
     scale: float = 1.0,
+    untracked: set[str] | None = None,
 ) -> bytes:
-    """테스트와 가짜 iPhone(tools/fake_phone.py)용 패킷 생성기."""
+    """테스트와 가짜 iPhone(fake_phone.py)용 패킷 생성기. untracked: 위치는 보내되 '추적 안 됨' 표시할 관절."""
     tracked = bool(joints)
     count = len(JOINT_NAMES) if tracked else 0
     mask = 0
@@ -135,7 +144,7 @@ def build_frame(
     if tracked:
         for i, name in enumerate(JOINT_NAMES):
             pose = joints.get(name)
-            if pose is not None:
+            if pose is not None and (untracked is None or name not in untracked):
                 mask |= 1 << i
             body.append(_write_pose(pose))
         if root is None:

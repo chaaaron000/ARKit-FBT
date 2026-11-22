@@ -41,6 +41,7 @@ class Snapshot:
     facing: float = 0.0
     yaw_aligned_at: float | None = None
     last_yaw: float | None = None
+    lean_deg: float | None = None
     gesture_progress: float = 0.0
     osc_sent: int = 0
     osc_errors: int = 0
@@ -187,6 +188,7 @@ class Engine:
                 facing=frame.facing if frame else 0.0,
                 yaw_aligned_at=self._yaw_aligned_at,
                 last_yaw=self._last_yaw,
+                lean_deg=self.processor.lean_deg,
                 gesture_progress=self._gesture_progress,
                 osc_sent=self.osc.sent,
                 osc_errors=self.osc.errors,
@@ -324,5 +326,9 @@ class Engine:
             self.osc.send_head_yaw(yaw)
             self._yaw_aligned_at = time.time()
             self._last_yaw = yaw
-            self.log(f"방향 정렬 [{self._yaw_request}] yaw={yaw:.1f}°")
+            lean = ""
+            if s.upright_correction:
+                deg = self.processor.calibrate_upright()
+                lean = f", 자세 기울기 보정 {deg:.1f}°" if deg is not None else ", 자세 보정 실패(전신이 보여야 함)"
+            self.log(f"방향 정렬 [{self._yaw_request}] yaw={yaw:.1f}°{lean}")
             self._yaw_request = None
