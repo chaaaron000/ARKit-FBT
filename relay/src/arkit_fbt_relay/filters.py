@@ -28,11 +28,18 @@ class OneEuroFilter:
         self._x: np.ndarray | None = None
         self._dx: np.ndarray | None = None
         self._t: float | None = None
+        self._v: np.ndarray | None = None
+
+    @property
+    def velocity(self) -> np.ndarray | None:
+        """필터 출력의 변화 속도 (단위/초). 예측에 쓴다."""
+        return None if self._v is None else self._v.copy()
 
     def __call__(self, x, t: float) -> np.ndarray:
         x = np.asarray(x, dtype=float)
         if self._x is None or self._t is None:
             self._x, self._dx, self._t = x.copy(), np.zeros_like(x), t
+            self._v = np.zeros_like(x)
             return x.copy()
         dt = t - self._t
         if dt <= 0:
@@ -45,6 +52,9 @@ class OneEuroFilter:
         cutoff = self.min_cutoff + self.beta * float(np.linalg.norm(dx_hat))
         a = _alpha(dt, cutoff)
         x_hat = a * x + (1 - a) * self._x
+        v = (x_hat - self._x) / dt
+        a_v = _alpha(dt, self.d_cutoff * 4)
+        self._v = a_v * v + (1 - a_v) * (self._v if self._v is not None else np.zeros_like(x))
         self._x, self._dx, self._t = x_hat, dx_hat, t
         return x_hat.copy()
 

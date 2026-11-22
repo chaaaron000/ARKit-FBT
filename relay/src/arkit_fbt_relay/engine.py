@@ -9,11 +9,13 @@ import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 
 from .osc_out import OscOut
 from .pipeline import FrameOut, Processor, Settings, unity_yaw_from_forward
+from .recording import Recorder
 from .protocol import (
     STATUS_DRY_RUN, STATUS_OSC_SENDING, STATUS_YAW_ALIGNED, ProtocolError, build_ack, parse_frame,
 )
@@ -80,6 +82,7 @@ class Engine:
         self._last_ack = 0.0
         self._last_frame: FrameOut | None = None
         self._gesture_progress = 0.0
+        self._recorder: Recorder | None = None
 
     # ------------------------------------------------------------------ 제어
 
@@ -103,6 +106,27 @@ class Engine:
             self._thread.join(timeout=2)
         if self._sock is not None:
             self._sock.close()
+        self.stop_recording()
+
+    def start_recording(self, path: Path) -> None:
+        with self._lock:
+            if self._recorder is not None:
+                return
+            self._recorder = Recorder(path)
+        self.log(f"녹화 시작: {path}")
+
+    def stop_recording(self) -> Path | None:
+        with self._lock:
+            rec, self._recorder = self._recorder, None
+        if rec is None:
+            return None
+        rec.close()
+        self.log(f"녹화 저장: {rec.path} ({rec.count}개, {time.monotonic() - rec.started:.0f}초)")
+        return rec.path
+
+    @property
+    def recording(self) -> Recorder | None:
+        return self._recorder
 
     @property
     def bound_port(self) -> int:
@@ -183,6 +207,9 @@ class Engine:
 
     def handle_packet(self, data: bytes, addr: tuple[str, int]) -> None:
         now = time.monotonic()
+        with self._lock:
+            if self._recorder is not None:
+                self._recorder.write(now, data)
         try:
             frame = parse_frame(data)
         except ProtocolError as e:

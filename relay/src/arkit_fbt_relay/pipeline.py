@@ -47,6 +47,8 @@ class Settings:
     rot_beta: float = 0.3
     # 한 프레임 이동 속도가 이보다 빠르면 오인식으로 보고 잠깐 무시 (m/s)
     max_speed: float = 6.0
+    # 지연을 줄이기 위해 속도 방향으로 미리 내다보는 시간 (ms). 크면 동작이 튀어나간다.
+    prediction_ms: float = 0.0
     stabilize_camera: bool = True
     send_head_position: bool = True
     auto_yaw_on_start: bool = True
@@ -100,6 +102,7 @@ def _horizontal(v: np.ndarray) -> np.ndarray | None:
 class Processor:
     CAMERA_JUMP_POS = 0.05  # m / frame
     CAMERA_JUMP_ROT = math.radians(3.0)  # rad / frame
+    MAX_PREDICTION = 0.15  # m
 
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -221,7 +224,16 @@ class Processor:
         rf = self._rot_f.get(name)
         if rf is None:
             rf = self._rot_f[name] = QuatOneEuroFilter(s.rot_min_cutoff, s.rot_beta)
-        return pf(pos, t), rf(rot, t)
+        out_pos = pf(pos, t)
+        if s.prediction_ms > 0:
+            v = pf.velocity
+            if v is not None:
+                lead = v * (s.prediction_ms / 1000.0)
+                n = float(np.linalg.norm(lead))
+                if n > self.MAX_PREDICTION:
+                    lead *= self.MAX_PREDICTION / n
+                out_pos = out_pos + lead
+        return out_pos, rf(rot, t)
 
 
 def unity_yaw_from_forward(forward: np.ndarray, flip: bool = False) -> float:

@@ -4,6 +4,8 @@ __pycache__/
 .venv/
 .pytest_cache/
 relay/config.json
+relay/recordings/
+*.afbtrec
 
 # iOS (XcodeGen이 생성)
 ios/*.xcodeproj/
@@ -13,5 +15,5 @@ ios/build/
 DerivedData/
 
 # 도구
-graft/
+/graft/
 .claude/

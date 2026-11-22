@@ -22,7 +22,7 @@ iPhone(ARKit 바디 트래킹)으로 VRChat 풀트래킹을 하는 프로젝트�
 
 ## 1. PC 중계 프로그램 실행
 
-[uv](https://docs.astral.sh/uv/)가 필요합니다.
+[uv](https://docs.astral.sh/uv/)가 필요합니다. **`run_relay.bat`을 더블클릭**하거나, 다음처럼 실행합니다.
 
 ```powershell
 cd relay
@@ -31,7 +31,24 @@ uv run arkit-fbt-relay
 
 - 처음 실행할 때 **Windows 방화벽 창이 뜨면 "개인 네트워크" 허용**을 눌러야 iPhone 데이터를 받을 수 있습니다.
 - 창 왼쪽 위 "이 PC 주소"를 iPhone 앱에 입력합니다.
-- 옵션: `--headless`(콘솔 모드), `--dry-run`(VRChat으로 보내지 않음), `--help`
+- 옵션: `--headless`(콘솔 모드), `--dry-run`(VRChat으로 보내지 않음), `--record`(시작하자마자 녹화), `--help`
+
+### 튜닝
+| 슬라이더 | 효과 |
+|---|---|
+| 위치/회전 안정도 | 낮을수록 가만히 있을 때 떨림이 줄지만 반응이 느려집니다. |
+| 위치/회전 반응성 | 높을수록 빠른 동작에서 지연이 줄지만 떨림이 늘어납니다. |
+| 예측 (ms) | 움직이는 방향으로 미리 내다봐서 지연을 줄입니다. 30~60ms부터 시험해 보세요. 너무 크면 동작이 튀어나갑니다. |
+| 튐 제거 속도 | 이보다 빠른 순간 이동은 오인식으로 보고 무시합니다. |
+
+### 녹화와 분석
+창의 **● 녹화 시작** 버튼을 누르면 iPhone에서 오는 원본 데이터가 `relay/recordings/`에 저장됩니다. 녹화 파일로 실제 떨림, 지연 변동, 관절 인식률을 확인하고, 같은 동작을 반복 재생하면서 튜닝할 수 있습니다.
+
+```powershell
+cd relay
+uv run python -m arkit_fbt_relay.recording analyze recordings\<파일>.afbtrec   # 분석 리포트
+uv run python -m arkit_fbt_relay.recording replay  recordings\<파일>.afbtrec   # 중계 프로그램으로 다시 재생
+```
 
 ## 2. iPhone 앱 설치
 

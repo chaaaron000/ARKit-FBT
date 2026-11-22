@@ -13,7 +13,9 @@ from .engine import Engine
 from .pipeline import Settings
 from .protocol import DEFAULT_PORT
 
-DEFAULT_CONFIG = Path(__file__).resolve().parents[2] / "config.json"
+RELAY_DIR = Path(__file__).resolve().parents[2]
+DEFAULT_CONFIG = RELAY_DIR / "config.json"
+RECORDINGS_DIR = RELAY_DIR / "recordings"
 
 
 def local_ipv4_addresses() -> list[str]:
@@ -84,6 +86,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     p.add_argument("--headless", action="store_true", help="창 없이 콘솔로 실행")
     p.add_argument("--dry-run", action="store_true", help="VRChat으로 보내지 않음")
+    p.add_argument("--record", action="store_true",
+                   help=f"시작하자마자 iPhone 데이터를 녹화 ({RECORDINGS_DIR})")
     args = p.parse_args(argv)
 
     settings = load_settings(args.config)
@@ -98,13 +102,15 @@ def main(argv: list[str] | None = None) -> int:
     ips = local_ipv4_addresses()
     engine.log("iPhone 앱에 입력할 이 PC 주소: " + (", ".join(ips) if ips else "(찾지 못함)")
                + f"  포트 {args.listen_port}")
+    if args.record:
+        engine.start_recording(RECORDINGS_DIR / (time.strftime("%Y%m%d-%H%M%S") + ".afbtrec"))
 
     try:
         if args.headless:
             run_headless(engine)
         else:
             from .gui import run_gui
-            run_gui(engine, ips, lambda: save_settings(settings, args.config))
+            run_gui(engine, ips, lambda: save_settings(settings, args.config), RECORDINGS_DIR)
     finally:
         engine.stop()
     return 0

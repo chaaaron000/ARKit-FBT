@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from pathlib import Path
 
 import numpy as np
 import pyqtgraph as pg
@@ -52,10 +53,12 @@ class FloatSlider(QtWidgets.QWidget):
 
 
 class MainWindow(QtWidgets.QMainWindow):
-    def __init__(self, engine: Engine, ips: list[str], save: Callable[[], None]):
+    def __init__(self, engine: Engine, ips: list[str], save: Callable[[], None],
+                 recordings_dir: Path = Path("recordings")):
         super().__init__()
         self.engine = engine
         self.save = save
+        self.recordings_dir = recordings_dir
         self.setWindowTitle("ARKit FBT Relay")
         self.resize(1180, 720)
 
@@ -136,6 +139,8 @@ class MainWindow(QtWidgets.QMainWindow):
         form.addRow("회전 안정도", slider("rot_min_cutoff", 0.05, 5.0, "낮을수록 떨림↓ 지연↑"))
         form.addRow("회전 반응성", slider("rot_beta", 0.0, 3.0, "높을수록 지연↓ 떨림↑"))
         form.addRow("튐 제거 속도(m/s)", slider("max_speed", 2.0, 15.0, "이보다 빠른 순간 이동은 무시"))
+        form.addRow("예측 (ms)", slider("prediction_ms", 0.0, 120.0,
+                                         "움직이는 방향으로 미리 내다봐서 지연을 줄입니다. 크면 동작이 튀어나갑니다 (0 = 끔)"))
 
         def check(attr: str, text: str, tip: str = "") -> QtWidgets.QCheckBox:
             cb = QtWidgets.QCheckBox(text)
@@ -155,7 +160,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _action_box(self) -> QtWidgets.QGroupBox:
         box = QtWidgets.QGroupBox("동작")
-        lay = QtWidgets.QHBoxLayout(box)
+        lay = QtWidgets.QGridLayout(box)
         b1 = QtWidgets.QPushButton("지금 방향 정렬")
         b1.setToolTip("카메라를 정면으로 바라보고 누르세요")
         b1.clicked.connect(lambda: self.engine.request_yaw_align("버튼"))
@@ -163,9 +168,21 @@ class MainWindow(QtWidgets.QMainWindow):
         b2.clicked.connect(self.engine.reset_camera)
         b3 = QtWidgets.QPushButton("설정 저장")
         b3.clicked.connect(self._save)
-        for b in (b1, b2, b3):
-            lay.addWidget(b)
+        self.rec_button = QtWidgets.QPushButton("● 녹화 시작")
+        self.rec_button.setToolTip("iPhone에서 오는 원본 데이터를 파일로 저장합니다 (분석/튜닝용)")
+        self.rec_button.clicked.connect(self._toggle_recording)
+        lay.addWidget(b1, 0, 0)
+        lay.addWidget(b2, 0, 1)
+        lay.addWidget(self.rec_button, 1, 0)
+        lay.addWidget(b3, 1, 1)
         return box
+
+    def _toggle_recording(self) -> None:
+        if self.engine.recording is None:
+            name = time.strftime("%Y%m%d-%H%M%S") + ".afbtrec"
+            self.engine.start_recording(self.recordings_dir / name)
+        else:
+            self.engine.stop_recording()
 
     def _plots(self) -> pg.GraphicsLayoutWidget:
         pg.setConfigOptions(antialias=True)
@@ -236,6 +253,14 @@ class MainWindow(QtWidgets.QMainWindow):
         mark(st["osc"], osc_on, f"{'켜짐' if osc_on else '꺼짐'} · {snap.osc_sent} msg"
              + (f" · 오류 {snap.osc_errors}" if snap.osc_errors else ""))
 
+        rec = self.engine.recording
+        if rec is None:
+            self.rec_button.setText("● 녹화 시작")
+            self.rec_button.setStyleSheet("")
+        else:
+            self.rec_button.setText(f"■ 녹화 중지 ({time.monotonic() - rec.started:.0f}초)")
+            self.rec_button.setStyleSheet("color:#e71d36; font-weight:bold;")
+
         new_logs = snap.logs[self._log_count:] if len(snap.logs) >= self._log_count else snap.logs
         for line in new_logs:
             self.log_view.appendPlainText(line)
@@ -278,7 +303,7 @@ class MainWindow(QtWidgets.QMainWindow):
         return a[:, 0], a[:, 2]
 
 
-def run_gui(engine: Engine, ips: list[str], save: Callable[[], None]) -> None:
+def run_gui(engine: Engine, ips: list[str], save: Callable[[], None], recordings_dir: Path) -> None:
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     app.setStyle("Fusion")
     pal = QtGui.QPalette()
@@ -289,6 +314,6 @@ def run_gui(engine: Engine, ips: list[str], save: Callable[[], None]) -> None:
     pal.setColor(QtGui.QPalette.ColorRole.Button, QtGui.QColor("#2b2d36"))
     pal.setColor(QtGui.QPalette.ColorRole.ButtonText, QtGui.QColor("#e6e6e6"))
     app.setPalette(pal)
-    win = MainWindow(engine, ips, save)
+    win = MainWindow(engine, ips, save, recordings_dir)
     win.show()
     app.exec()
