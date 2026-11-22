@@ -43,6 +43,8 @@ class Snapshot:
     last_yaw: float | None = None
     lean_deg: float | None = None
     gated: list[str] = field(default_factory=list)
+    # 최근 3초 동안 ARKit이 21개 관절을 모두 '추적 중'으로 표시한 프레임 비율 (0~1)
+    track_quality: float | None = None
     gesture_progress: float = 0.0
     osc_sent: int = 0
     osc_errors: int = 0
@@ -79,6 +81,7 @@ class Engine:
         self._gesture_armed = True
 
         self._arrivals: deque[float] = deque(maxlen=120)
+        self._quality: deque[tuple[float, bool]] = deque(maxlen=400)
         self._last_seq: int | None = None
         self._lost = 0
         self._bad = 0
@@ -182,6 +185,8 @@ class Engine:
                 jitter = float(statistics.pstdev(intervals))
             alive = now - self._last_packet < 1.0
             frame = self._last_frame
+            recent_q = [full for (qt, full) in self._quality if now - qt < 3.0]
+            quality = sum(recent_q) / len(recent_q) if alive and len(recent_q) >= 10 else None
             return Snapshot(
                 phone_addr=f"{self._phone_addr[0]}:{self._phone_addr[1]}" if self._phone_addr else None,
                 phone_alive=alive,
@@ -195,6 +200,7 @@ class Engine:
                 last_yaw=self._last_yaw,
                 lean_deg=self.processor.lean_deg,
                 gated=sorted(self.processor.gated) if alive else [],
+                track_quality=quality,
                 gesture_progress=self._gesture_progress,
                 osc_sent=self.osc.sent,
                 osc_errors=self.osc.errors,
@@ -260,6 +266,9 @@ class Engine:
             self._last_seq = frame.seq
             self._arrivals.append(now)
             self._last_packet = now
+            if frame.tracked:
+                full = frame.tracked_joints is None or len(frame.tracked_joints) >= len(frame.joints) > 0
+                self._quality.append((now, full))
 
             out = self.processor.process(frame)
             self._last_frame = out

@@ -68,6 +68,14 @@ def test_display_rotation():
     assert display_rotation(quat_from_axis_angle([0, 0, 1], math.radians(10))) == 0
 
 
+def _pose(head, lfoot, rfoot):
+    j = [(0.5, 0.5)] * len(JOINT_NAMES)
+    j[JOINT_NAMES.index("head_joint")] = head
+    j[JOINT_NAMES.index("left_foot_joint")] = lfoot
+    j[JOINT_NAMES.index("right_foot_joint")] = rfoot
+    return j
+
+
 def test_framing_warnings():
     assert framing_warnings(JOINTS, JOINT_NAMES) == []
     bad = list(JOINTS)
@@ -76,6 +84,18 @@ def test_framing_warnings():
     w = framing_warnings(bad, JOINT_NAMES)
     assert any("머리" in x for x in w) and any("왼발" in x for x in w)
     assert framing_warnings([], JOINT_NAMES)
+    # 실측처럼 머리·발이 화면 끝에 닿을 만큼 가까움
+    assert any("가까움" in x for x in framing_warnings(_pose((0.3, 0.09), (0.28, 0.93), (0.35, 0.94)), JOINT_NAMES))
+    # 가장자리
+    assert any("가장자리" in x for x in framing_warnings(_pose((0.2, 0.25), (0.18, 0.8), (0.24, 0.8)), JOINT_NAMES))
+    # 적당
+    assert framing_warnings(_pose((0.5, 0.25), (0.46, 0.8), (0.54, 0.8)), JOINT_NAMES) == []
+
+
+def test_framing_uses_display_rotation():
+    # 세로로 세운 폰: 센서 이미지에서는 몸이 가로로 누워 있다 (rot=1 이면 반시계 90°로 세움)
+    sensor = _pose((0.75, 0.5), (0.2, 0.46), (0.2, 0.54))
+    assert framing_warnings(sensor, JOINT_NAMES, rot=1) == []
 
 
 def test_engine_collects_preview_only_when_wanted():

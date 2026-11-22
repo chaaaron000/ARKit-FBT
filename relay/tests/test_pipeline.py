@@ -69,7 +69,7 @@ def test_facing_learns_mirrored_labels():
 
 
 def test_turned_body_yaw():
-    p = Processor(raw_settings())
+    p = Processor(raw_settings(lock_yaw_to_camera=False))
     turn = math.radians(40)
     for i in range(10):
         out = p.process(frame(i / 60, synth_joints(i / 60, body_yaw=turn)))
@@ -201,6 +201,21 @@ def test_flat_feet_rotation_is_yaw_only():
     for t in out.trackers:
         x, _y, z = unity_euler_from_quat(to_unity_quat(t.rot))
         assert abs(x) < 1e-3 and abs(z) < 1e-3
+
+
+def test_lock_yaw_to_camera_ignores_wrong_arkit_orientation():
+    """ARKit이 몸을 60° 돌아간 것으로 잘못 잡아도 골반·발 방향은 카메라 정면을 유지한다."""
+    p = Processor(Settings(enabled_trackers=["hip", "left_foot"]))
+    for i in range(60):
+        out = p.process(frame(i / 60, synth_joints(i / 60, body_yaw=math.radians(60))))
+    assert out.facing < 0.6  # ARKit 기준으로는 많이 돌아간 상태
+    assert np.allclose(out.forward, [0, 0, 1], atol=0.05)  # 카메라(+Z) 쪽
+    for t in out.trackers:
+        x, y, z = unity_euler_from_quat(to_unity_quat(t.rot))
+        assert abs(x) < 1e-3 and abs(z) < 1e-3
+        # 카메라 정면 방향의 yaw 회전 (ARKit 몸 방향 60° 와 무관). VRChat 캘리브레이션이 오프셋을 기억하므로
+        # 절대값보다 '항상 같은 값'인 것이 중요하다.
+        assert abs(y) < 3
 
 
 def test_head_horizontal_from_chest():

@@ -77,6 +77,9 @@ class Settings:
     # 몸 기울기 추정의 시간 상수 (초). 이보다 오래 지속되는 기울기는 오차로 보고 바로 세운다.
     upright_tau: float = 8.0
     flat_feet: bool = True
+    # 골반·발 방향을 '카메라를 바라보는 방향'으로 고정한다. ARKit 몸 방향 추정은 정면을 봐도
+    # 70° 이상 틀어지는 일이 잦고(실측), 몸을 많이 돌리면 어차피 추적을 놓친다.
+    lock_yaw_to_camera: bool = True
     # VRChat에 보낼 머리 위치의 수평 성분: "chest"(가슴, 추천) / "neck"(목) / "head"(ARKit 머리)
     # 헤드셋을 쓰면 ARKit 머리가 앞으로 쏠려 몸 전체가 밀려 보인다 (실측 골반 기준 17cm).
     head_horizontal: str = "chest"
@@ -365,6 +368,10 @@ class Processor:
             self._last_forward = out.forward
         elif self._last_forward is not None:
             out.forward = self._last_forward
+        if s.lock_yaw_to_camera:
+            to_cam = _horizontal(cam_world.pos - self._axis_hips)
+            if to_cam is not None:
+                out.forward = to_cam  # 방향 정렬·발 방향 모두 '카메라 정면' 기준 (facing 은 ARKit 값 유지)
         yaw_q = None
         if out.forward is not None:
             self._yaw_f.min_cutoff, self._yaw_f.beta = s.rot_min_cutoff, s.rot_beta
@@ -372,13 +379,14 @@ class Processor:
             yaw_q = self._yaw_f(raw, t)
 
         enabled = set(s.enabled_trackers)
+        yaw_only = FLAT_TRACKERS | ({"hip"} if s.lock_yaw_to_camera else set())
         for index, name, joint, _label in TRACKERS:
             if name not in enabled:
                 continue
             pos = joint_pos(joint)
             if pos is None:
                 continue
-            if s.flat_feet and name in FLAT_TRACKERS and yaw_q is not None:
+            if (s.flat_feet or s.lock_yaw_to_camera) and name in yaw_only and yaw_q is not None:
                 rot = yaw_q
             elif joint in world:
                 rf = self._rot_f.get(joint)

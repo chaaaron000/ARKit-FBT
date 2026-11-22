@@ -116,7 +116,7 @@ class MainWindow(QtWidgets.QMainWindow):
             ("ip", "이 PC 주소"), ("phone", "iPhone"), ("rate", "수신 속도"),
             ("jitter", "수신 간격 흔들림"), ("lost", "손실 / 오류"), ("tracked", "몸 인식"),
             ("facing", "카메라 정면"), ("yaw", "방향 정렬"), ("lean", "자세 기울기 보정"),
-            ("gate", "불안정해서 고정 중"),
+            ("gate", "불안정해서 고정 중"), ("quality", "ARKit 추적 품질 (3초)"),
             ("gesture", "손 들기 제스처"),
             ("osc", "VRChat 전송"),
         ]
@@ -192,6 +192,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         check("osc_enabled", "VRChat으로 전송")
         check("quality_gate", "불안정할 때 고정 (ARKit이 몸을 놓치면 마지막 안정 자세 유지)")
+        check("lock_yaw_to_camera", "몸 방향을 카메라 정면으로 고정 (허리 회전 안정화)",
+              "ARKit 몸 방향 추정은 자주 틀어집니다. 끄면 ARKit 방향을 따르지만 허리가 흔들릴 수 있습니다")
         check("upright_correction", "자세 기울기 보정 (카메라 쪽으로 기우는 오차 제거)")
         check("flat_feet", "발·무릎을 평평하게 (ARKit 발 각도 무시, 몸 방향만 따름)")
         check("send_head_position", "머리 위치 전송 (VRChat 자동 위치 정렬)", "끄면 트래커가 따로 놉니다")
@@ -357,6 +359,8 @@ class MainWindow(QtWidgets.QMainWindow):
                       "left_upLeg_joint": "왼허벅지", "right_upLeg_joint": "오른허벅지"})
         gated = [names.get(g, g) for g in snap.gated]
         mark(st["gate"], not gated, ", ".join(gated) if gated else "없음")
+        q = snap.track_quality
+        mark(st["quality"], q is not None and q >= 0.9, "-" if q is None else f"{q * 100:.0f}%")
         if snap.lean_deg is not None:
             mark(st["lean"], True, f"{snap.lean_deg:.1f}° 바로 세우는 중")
         else:
@@ -413,12 +417,17 @@ class MainWindow(QtWidgets.QMainWindow):
             QtCore.Qt.TransformationMode.SmoothTransformation)
         self.preview_label.setPixmap(pix)
 
-        warnings = framing_warnings(p.joints, JOINT_NAMES)
+        warnings = framing_warnings(p.joints, JOINT_NAMES, self._preview_rot)
+        q = snap.track_quality
+        q_text = f"ARKit 추적 품질 {q * 100:.0f}%" if q is not None else "ARKit 추적 품질 -"
         if warnings:
-            self.framing_label.setText("⚠ " + ", ".join(warnings) + " — 폰 위치나 거리를 조정하세요")
+            self.framing_label.setText(f"⚠ {', '.join(warnings)}  ({q_text})")
+            self.framing_label.setStyleSheet("color:#ffd166; font-weight:bold;")
+        elif q is not None and q < 0.9:
+            self.framing_label.setText(f"⚠ {q_text} — 정면을 보고, 배경이 단순하고 밝은 곳에 서 보세요")
             self.framing_label.setStyleSheet("color:#ffd166; font-weight:bold;")
         else:
-            self.framing_label.setText("✔ 머리부터 발끝까지 화면 안에 있습니다")
+            self.framing_label.setText(f"✔ 위치 좋음  ({q_text})")
             self.framing_label.setStyleSheet("color:#2ec4b6; font-weight:bold;")
 
     def _paint_skeleton(self, img: QtGui.QImage, joints) -> None:
