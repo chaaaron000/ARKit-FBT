@@ -15,10 +15,20 @@ final class BodyTracker: NSObject, ObservableObject, ARSessionDelegate {
     @Published private(set) var connectionText = "PC 주소를 입력하세요"
     @Published private(set) var thermalText = "-"
     @Published private(set) var missingJoints: [String] = []
+    /// 자동 찾기로 찾은 PC 이름 목록
+    @Published private(set) var discoveredNames: [String] = []
+    /// 지금 자동 찾기로 연결된 PC 이름 (수동 주소를 쓰면 nil)
+    @Published private(set) var autoTargetName: String?
 
     private weak var arView: ARView?
     private let sender = UDPSender()
+    private let browser = RelayBrowser()
+    private let preview = PreviewSender()
+    private var discovered: [RelayBrowser.Found] = []
     private var sendingEnabled = true
+    private var autoDiscover = true
+    private var manualHost = ""
+    private var manualPort = WireProtocol.defaultPort
     private var seq: UInt32 = 0
     private let jointIndices: [Int]
     private var jointEntities: [ModelEntity] = []
@@ -41,6 +51,15 @@ final class BodyTracker: NSObject, ObservableObject, ARSessionDelegate {
         sender.onState = { [weak self] text in
             self?.connectionText = text
         }
+        browser.onChange = { [weak self] found in
+            guard let self else { return }
+            self.discovered = found
+            self.discoveredNames = found.map { $0.name }
+            self.updateConnection()
+        }
+        browser.onState = { [weak self] text in
+            self?.connectionText = text
+        }
         statusTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             self?.tickStatus()
         }
@@ -53,12 +72,38 @@ final class BodyTracker: NSObject, ObservableObject, ARSessionDelegate {
 
     // MARK: - 설정
 
-    func configure(host: String, port: Int, enabled: Bool) {
+    func configure(host: String, port: Int, enabled: Bool, autoDiscover auto: Bool) {
         sendingEnabled = enabled
-        if enabled, let p = UInt16(exactly: port) {
-            sender.connect(host: host, port: p)
+        autoDiscover = auto
+        manualHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        manualPort = port
+        if enabled && auto {
+            browser.start()
+        } else if browser.isRunning {
+            browser.stop()
+        }
+        updateConnection()
+    }
+
+    /// 우선순위: 자동으로 찾은 PC → 수동 입력 주소
+    private func updateConnection() {
+        guard sendingEnabled else {
+            sender.disconnect()
+            autoTargetName = nil
+            connectionText = "전송 꺼짐"
+            return
+        }
+        if autoDiscover, let first = discovered.first {
+            if autoTargetName != first.name { autoTargetName = first.name }
+            sender.connect(to: first.endpoint)
+            return
+        }
+        if autoTargetName != nil { autoTargetName = nil }
+        if !manualHost.isEmpty, let p = UInt16(exactly: manualPort) {
+            sender.connect(host: manualHost, port: p)
         } else {
             sender.disconnect()
+            connectionText = autoDiscover ? "PC를 찾는 중… (PC 프로그램이 켜져 있나요?)" : "PC 주소를 입력하세요"
         }
     }
 
@@ -106,6 +151,12 @@ final class BodyTracker: NSObject, ObservableObject, ARSessionDelegate {
                                              body: body,
                                              jointIndices: jointIndices)
             sender.send(packet)
+
+            if pcConnected && (relayStatus & RelayAck.statusWantPreview) != 0 {
+                preview.maybeSend(frame: frame, body: body, jointIndices: jointIndices) { [weak self] chunk in
+                    self?.sender.send(chunk)
+                }
+            }
         }
 
         updateVisuals(tracked ? body : nil)

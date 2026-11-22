@@ -15,9 +15,11 @@ import numpy as np
 
 from .osc_out import OscOut
 from .pipeline import FrameOut, Processor, Settings, unity_yaw_from_forward
+from .preview import Preview, Reassembler, is_preview_chunk
 from .recording import Recorder
 from .protocol import (
-    STATUS_DRY_RUN, STATUS_OSC_SENDING, STATUS_YAW_ALIGNED, ProtocolError, build_ack, parse_frame,
+    STATUS_DRY_RUN, STATUS_OSC_SENDING, STATUS_WANT_PREVIEW, STATUS_YAW_ALIGNED, ProtocolError,
+    build_ack, parse_frame,
 )
 
 ACK_INTERVAL = 0.2
@@ -43,6 +45,7 @@ class Snapshot:
     osc_sent: int = 0
     osc_errors: int = 0
     frame: FrameOut | None = None
+    preview: Preview | None = None
     logs: list[str] = field(default_factory=list)
 
 
@@ -83,6 +86,10 @@ class Engine:
         self._last_frame: FrameOut | None = None
         self._gesture_progress = 0.0
         self._recorder: Recorder | None = None
+        # GUI가 켜져 있을 때 iPhone에 카메라 미리보기를 요청한다
+        self.want_preview = False
+        self._reassembler = Reassembler()
+        self._preview: Preview | None = None
 
     # ------------------------------------------------------------------ 제어
 
@@ -184,6 +191,7 @@ class Engine:
                 osc_sent=self.osc.sent,
                 osc_errors=self.osc.errors,
                 frame=frame if alive else None,
+                preview=self._preview if alive and self.want_preview else None,
                 logs=list(self._logs),
             )
 
@@ -207,6 +215,13 @@ class Engine:
 
     def handle_packet(self, data: bytes, addr: tuple[str, int]) -> None:
         now = time.monotonic()
+        if is_preview_chunk(data):
+            if self.want_preview:
+                preview = self._reassembler.add(data)
+                if preview is not None:
+                    with self._lock:
+                        self._preview = preview
+            return
         with self._lock:
             if self._recorder is not None:
                 self._recorder.write(now, data)
@@ -258,6 +273,8 @@ class Engine:
             s |= STATUS_YAW_ALIGNED
         if self.dry_run:
             s |= STATUS_DRY_RUN
+        if self.want_preview:
+            s |= STATUS_WANT_PREVIEW
         return s
 
     def _update_triggers(self, out: FrameOut, now: float) -> None:

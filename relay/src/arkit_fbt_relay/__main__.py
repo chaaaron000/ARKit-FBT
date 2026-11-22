@@ -88,6 +88,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--dry-run", action="store_true", help="VRChat으로 보내지 않음")
     p.add_argument("--record", action="store_true",
                    help=f"시작하자마자 iPhone 데이터를 녹화 ({RECORDINGS_DIR})")
+    p.add_argument("--no-discovery", action="store_true", help="Bonjour로 이 PC를 알리지 않음")
     args = p.parse_args(argv)
 
     settings = load_settings(args.config)
@@ -105,6 +106,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.record:
         engine.start_recording(RECORDINGS_DIR / (time.strftime("%Y%m%d-%H%M%S") + ".afbtrec"))
 
+    advertiser = None
+    if not args.no_discovery and args.listen_host in ("0.0.0.0", ""):
+        from .discovery import Advertiser, lan_addresses
+        lan = lan_addresses(ips)
+        try:
+            advertiser = Advertiser(engine.bound_port, lan)
+            advertiser.start()
+            engine.log(f"자동 찾기(Bonjour) 알림 중: {', '.join(lan)} — iPhone 앱에서 'PC 자동 찾기'를 켜세요")
+        except Exception as e:  # mDNS 실패해도 수동 입력으로 쓸 수 있다
+            advertiser = None
+            engine.log(f"자동 찾기(Bonjour)를 시작하지 못했습니다: {e} — PC 주소를 직접 입력하세요")
+
     try:
         if args.headless:
             run_headless(engine)
@@ -112,6 +125,8 @@ def main(argv: list[str] | None = None) -> int:
             from .gui import run_gui
             run_gui(engine, ips, lambda: save_settings(settings, args.config), RECORDINGS_DIR)
     finally:
+        if advertiser is not None:
+            advertiser.stop()
         engine.stop()
     return 0
 

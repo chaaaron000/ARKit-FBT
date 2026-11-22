@@ -32,6 +32,7 @@ struct ContentView: View {
     @AppStorage("relayHost") private var host = ""
     @AppStorage("relayPort") private var port = WireProtocol.defaultPort
     @AppStorage("sendEnabled") private var sendEnabled = true
+    @AppStorage("autoDiscover") private var autoDiscover = true
     @State private var showSettings = false
 
     var body: some View {
@@ -54,13 +55,16 @@ struct ContentView: View {
             }
             .onAppear {
                 UIApplication.shared.isIdleTimerDisabled = true
-                // 주소가 없으면 처음에 한 번 열어 준다. 입력 중에는 닫히지 않는다 ("닫기"로만 닫힘).
-                if host.isEmpty { showSettings = true }
                 apply()
+                // 3초 안에 PC를 못 찾으면 설정을 한 번 열어 준다. 입력 중에는 닫히지 않는다 ("닫기"로만 닫힘).
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                    if !tracker.pcConnected { showSettings = true }
+                }
             }
             .onChange(of: host) { _ in apply() }
             .onChange(of: port) { _ in apply() }
             .onChange(of: sendEnabled) { _ in apply() }
+            .onChange(of: autoDiscover) { _ in apply() }
         } else {
             VStack(spacing: 12) {
                 Image(systemName: "exclamationmark.triangle").font(.largeTitle)
@@ -72,7 +76,7 @@ struct ContentView: View {
     }
 
     private func apply() {
-        tracker.configure(host: host, port: port, enabled: sendEnabled)
+        tracker.configure(host: host, port: port, enabled: sendEnabled, autoDiscover: autoDiscover)
     }
 
     private var statusBar: some View {
@@ -112,6 +116,15 @@ struct ContentView: View {
     private var settingsPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("PC 중계 프로그램").font(.headline)
+            Toggle("PC 자동 찾기", isOn: $autoDiscover)
+            if autoDiscover {
+                if let name = tracker.autoTargetName {
+                    Label(name, systemImage: "desktopcomputer").font(.callout.bold()).foregroundColor(.green)
+                } else {
+                    Label("같은 Wi-Fi에서 PC를 찾는 중…", systemImage: "magnifyingglass").font(.callout)
+                }
+                Text("못 찾으면 아래에 PC 주소를 직접 입력하세요").font(.caption2).foregroundColor(.white.opacity(0.7))
+            }
             HStack {
                 TextField("", text: $host, prompt: Text("PC IP (예: 192.168.0.2)").foregroundColor(.white.opacity(0.5)))
                     .keyboardType(.numbersAndPunctuation)

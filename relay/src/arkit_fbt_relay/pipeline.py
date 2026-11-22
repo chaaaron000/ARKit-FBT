@@ -77,6 +77,7 @@ class TrackerOut:
 class FrameOut:
     tracked: bool
     camera_pos: np.ndarray
+    camera_rot: np.ndarray | None = None  # 보정 후 카메라 회전 (미리보기 방향 계산용)
     events: list[str] = field(default_factory=list)
     skeleton: dict[str, np.ndarray] = field(default_factory=dict)
     trackers: list[TrackerOut] = field(default_factory=list)
@@ -151,7 +152,8 @@ class Processor:
         self._cam_prev = cam
 
         fix = self._cam_ref @ cam.inverse() if s.stabilize_camera else Rigid.identity()
-        out = FrameOut(tracked=False, camera_pos=fix.apply(cam.pos), events=events)
+        cam_world = fix @ cam
+        out = FrameOut(tracked=False, camera_pos=cam_world.pos, camera_rot=cam_world.rot, events=events)
         if not frame.tracked or not frame.joints:
             return out
 

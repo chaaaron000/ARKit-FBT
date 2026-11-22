@@ -12,7 +12,8 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from .engine import Engine
 from .pipeline import TRACKERS
-from .protocol import BONES
+from .preview import display_rotation, framing_warnings
+from .protocol import BONES, JOINT_NAMES
 
 TRACKER_COLORS = {
     "hip": "#ff9f1c", "left_foot": "#2ec4b6", "right_foot": "#e71d36",
@@ -60,7 +61,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.save = save
         self.recordings_dir = recordings_dir
         self.setWindowTitle("ARKit FBT Relay")
-        self.resize(1180, 720)
+        self.resize(1440, 800)
+        self.engine.want_preview = True
+        self._preview_id = -1
+        self._preview_rot = 0
+        self._resized = False
 
         central = QtWidgets.QWidget()
         root = QtWidgets.QHBoxLayout(central)
@@ -76,7 +81,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
         right = QtWidgets.QVBoxLayout()
         root.addLayout(right, 1)
-        right.addWidget(self._plots(), 1)
+        views = QtWidgets.QHBoxLayout()
+        views.addWidget(self._preview_box(), 1)
+        views.addWidget(self._plots(), 1)
+        right.addLayout(views, 1)
         self.log_view = QtWidgets.QPlainTextEdit()
         self.log_view.setReadOnly(True)
         self.log_view.setMaximumBlockCount(500)
@@ -184,15 +192,42 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self.engine.stop_recording()
 
+    def _preview_box(self) -> QtWidgets.QGroupBox:
+        box = QtWidgets.QGroupBox("iPhone 카메라")
+        lay = QtWidgets.QVBoxLayout(box)
+        self.preview_check = QtWidgets.QCheckBox("카메라 미리보기 받기 (거치할 때 켜 두세요)")
+        self.preview_check.setChecked(True)
+        self.preview_check.toggled.connect(self._preview_toggled)
+        lay.addWidget(self.preview_check)
+        self.preview_label = QtWidgets.QLabel("iPhone 연결을 기다리는 중…")
+        self.preview_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.preview_label.setMinimumSize(320, 320)
+        self.preview_label.setSizePolicy(QtWidgets.QSizePolicy.Policy.Ignored,
+                                         QtWidgets.QSizePolicy.Policy.Ignored)
+        self.preview_label.setStyleSheet("background:#000; color:#888;")
+        lay.addWidget(self.preview_label, 1)
+        self.framing_label = QtWidgets.QLabel("")
+        self.framing_label.setWordWrap(True)
+        lay.addWidget(self.framing_label)
+        return box
+
+    def _preview_toggled(self, on: bool) -> None:
+        self.engine.want_preview = on
+        if not on:
+            self.preview_label.clear()
+            self.preview_label.setText("미리보기 꺼짐")
+            self.framing_label.setText("")
+            self._preview_id = -1
+
     def _plots(self) -> pg.GraphicsLayoutWidget:
         pg.setConfigOptions(antialias=True)
         w = pg.GraphicsLayoutWidget()
         self.views = {}
-        for col, (key, title, xl, yl) in enumerate([
+        for row, (key, title, xl, yl) in enumerate([
             ("front", "정면 (카메라 쪽에서 본 모습)", "X (m)", "높이 (m)"),
             ("top", "위에서 본 모습 (▲ = 카메라)", "X (m)", "Z (m)"),
         ]):
-            plot = w.addPlot(row=0, col=col, title=title)
+            plot = w.addPlot(row=row, col=0, title=title)
             plot.setAspectLocked(True)
             plot.showGrid(x=True, y=True, alpha=0.25)
             plot.setLabel("bottom", xl)
@@ -267,6 +302,83 @@ class MainWindow(QtWidgets.QMainWindow):
         self._log_count = len(snap.logs)
 
         self._draw(snap.frame)
+        self._draw_preview(snap)
+
+    def _draw_preview(self, snap) -> None:
+        if not self.engine.want_preview:
+            return
+        if snap.frame is not None and snap.frame.camera_rot is not None:
+            self._preview_rot = display_rotation(snap.frame.camera_rot)
+        p = snap.preview
+        if p is None:
+            if self._preview_id != -1 or not snap.phone_alive:
+                self.preview_label.clear()
+                self.preview_label.setText("iPhone 연결을 기다리는 중…" if not snap.phone_alive
+                                           else "미리보기를 받는 중…")
+                self._preview_id = -1
+            return
+        if p.frame_id == self._preview_id and not self._resized:
+            return
+        self._preview_id = p.frame_id
+        self._resized = False
+
+        img = QtGui.QImage.fromData(p.jpeg, "JPG")
+        if img.isNull():
+            return
+        img = img.convertToFormat(QtGui.QImage.Format.Format_RGB32)
+        self._paint_skeleton(img, p.joints)
+        if self._preview_rot:
+            img = img.transformed(QtGui.QTransform().rotate(-90 * self._preview_rot))
+        pix = QtGui.QPixmap.fromImage(img).scaled(
+            self.preview_label.size(), QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+            QtCore.Qt.TransformationMode.SmoothTransformation)
+        self.preview_label.setPixmap(pix)
+
+        warnings = framing_warnings(p.joints, JOINT_NAMES)
+        if warnings:
+            self.framing_label.setText("⚠ " + ", ".join(warnings) + " — 폰 위치나 거리를 조정하세요")
+            self.framing_label.setStyleSheet("color:#ffd166; font-weight:bold;")
+        else:
+            self.framing_label.setText("✔ 머리부터 발끝까지 화면 안에 있습니다")
+            self.framing_label.setStyleSheet("color:#2ec4b6; font-weight:bold;")
+
+    def _paint_skeleton(self, img: QtGui.QImage, joints) -> None:
+        if not joints:
+            return
+        w, h = img.width(), img.height()
+        idx = {n: i for i, n in enumerate(JOINT_NAMES)}
+
+        def pt(name: str):
+            i = idx[name]
+            p = joints[i] if i < len(joints) else None
+            return None if p is None else QtCore.QPointF(p[0] * w, p[1] * h)
+
+        painter = QtGui.QPainter(img)
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        painter.setPen(QtGui.QPen(QtGui.QColor("#d0d6e0"), 2))
+        for a, b in BONES:
+            pa, pb = pt(a), pt(b)
+            if pa is not None and pb is not None:
+                painter.drawLine(pa, pb)
+        enabled = set(self.engine.settings.enabled_trackers)
+        for _i, name, joint, _label in TRACKERS:
+            if name not in enabled:
+                continue
+            p = pt(joint)
+            if p is not None:
+                painter.setPen(QtGui.QPen(QtGui.QColor("white"), 1))
+                painter.setBrush(QtGui.QColor(TRACKER_COLORS[name]))
+                painter.drawEllipse(p, 6, 6)
+        head = pt("head_joint")
+        if head is not None:
+            painter.setPen(QtCore.Qt.PenStyle.NoPen)
+            painter.setBrush(QtGui.QColor("white"))
+            painter.drawEllipse(head, 5, 5)
+        painter.end()
+
+    def resizeEvent(self, event) -> None:
+        self._resized = True
+        super().resizeEvent(event)
 
     def _draw(self, frame) -> None:
         for key, v in self.views.items():

@@ -127,6 +127,7 @@ struct RelayAck {
     static let statusOscSending: UInt8 = 0x01
     static let statusYawAligned: UInt8 = 0x02
     static let statusDryRun: UInt8 = 0x04
+    static let statusWantPreview: UInt8 = 0x08
 
     init?(_ raw: Data) {
         let d = Data(raw)
