@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+relay/config.json
+
+# iOS (XcodeGen이 생성)
+ios/*.xcodeproj/
+ios/Support/Info.plist
+ios/build/
+*.ipa
+DerivedData/
+
+# 도구
+graft/
+.claude/

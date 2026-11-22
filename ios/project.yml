@@ -1,0 +1,37 @@
+name: ARKitFBT
+options:
+  bundleIdPrefix: io.github.arkitfbt
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  ARKitFBT:
+    type: application
+    platform: iOS
+    sources:
+      - path: ARKitFBT
+    info:
+      path: Support/Info.plist
+      properties:
+        CFBundleDisplayName: ARKit FBT
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSCameraUsageDescription: 몸의 움직임을 추적하기 위해 카메라가 필요합니다.
+        NSLocalNetworkUsageDescription: PC 중계 프로그램으로 트래킹 데이터를 보내기 위해 로컬 네트워크 접근이 필요합니다.
+        UIRequiredDeviceCapabilities: [arkit]
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.arkitfbt.app
+        TARGETED_DEVICE_FAMILY: "1"
