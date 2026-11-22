@@ -1,6 +1,6 @@
 import ARKit
 import Combine
-import RealityKit
+import SceneKit
 import UIKit
 
 /// ARKit 바디 트래킹을 돌리고 매 프레임 관절 데이터를 PC로 보낸다.
@@ -27,7 +27,11 @@ final class BodyTracker: NSObject, ObservableObject, ARSessionDelegate {
     @Published private(set) var supportedFormatsText = "-"
     private var lowResCamera = true
 
-    private weak var arView: ARView?
+    /// 화면과 독립된 AR 세션. 미리보기(ARSCNView)는 있을 때만 이 세션을 빌려 쓴다.
+    let session = ARSession()
+    /// 미리보기가 보일 때만 관절 노드를 갱신한다
+    var showVisuals = true
+    private var started = false
     private let sender = UDPSender()
     private let browser = RelayBrowser()
     private let preview = PreviewSender()
@@ -38,7 +42,6 @@ final class BodyTracker: NSObject, ObservableObject, ARSessionDelegate {
     private var manualPort = WireProtocol.defaultPort
     private var seq: UInt32 = 0
     private let jointIndices: [Int]
-    private var jointEntities: [ModelEntity] = []
 
     private var frameCount = 0
     private var bodyFrameCount = 0
@@ -50,6 +53,7 @@ final class BodyTracker: NSObject, ObservableObject, ARSessionDelegate {
         let definition = ARSkeletonDefinition.defaultBody3D
         jointIndices = JointSet.names.map { definition.index(for: ARSkeleton.JointName(rawValue: $0)) }
         super.init()
+        session.delegate = self
         missingJoints = zip(JointSet.names, jointIndices).filter { $0.1 == NSNotFound }.map { $0.0 }
 
         sender.onAck = { [weak self] data in
@@ -118,22 +122,32 @@ final class BodyTracker: NSObject, ObservableObject, ARSessionDelegate {
         }
     }
 
-    func attach(_ view: ARView) {
-        arView = view
-        view.session.delegate = self
-
-        let anchor = AnchorEntity(world: SIMD3<Float>(0, 0, 0))
-        let mesh = MeshResource.generateSphere(radius: 0.035)
-        let material = SimpleMaterial(color: .systemTeal, isMetallic: false)
-        jointEntities = JointSet.names.map { _ in
-            let entity = ModelEntity(mesh: mesh, materials: [material])
-            entity.isEnabled = false
-            anchor.addChild(entity)
-            return entity
-        }
-        view.scene.addAnchor(anchor)
+    /// 앱 시작 시 한 번 호출한다. 화면(미리보기) 유무와 관계없이 세션은 계속 돈다.
+    func start() {
+        guard !started else { return }
+        started = true
         restartSession()
     }
+
+    /// 미리보기 화면이 사라진 뒤 세션이 멈추지 않도록 다시 이어서 실행한다 (리셋 없음).
+    func ensureRunning() {
+        guard started, let config = session.configuration else { return }
+        session.run(config)
+    }
+
+    /// 미리보기(ARSCNView)에 붙일 관절 표시 노드
+    let visualRoot: SCNNode = {
+        let root = SCNNode()
+        let sphere = SCNSphere(radius: 0.035)
+        sphere.firstMaterial?.diffuse.contents = UIColor.systemTeal
+        sphere.firstMaterial?.lightingModel = .constant
+        for _ in JointSet.names {
+            let node = SCNNode(geometry: sphere)
+            node.isHidden = true
+            root.addChildNode(node)
+        }
+        return root
+    }()
 
     /// true면 가장 높은 fps 중 가장 낮은 해상도를 고른다 (발열↓). false면 같은 fps 중 가장 높은 해상도.
     func setLowResCamera(_ value: Bool) {
@@ -143,7 +157,7 @@ final class BodyTracker: NSObject, ObservableObject, ARSessionDelegate {
     }
 
     func restartSession() {
-        guard ARBodyTrackingConfiguration.isSupported, let view = arView else { return }
+        guard ARBodyTrackingConfiguration.isSupported, started else { return }
         let config = ARBodyTrackingConfiguration()
         config.automaticSkeletonScaleEstimationEnabled = true
 
@@ -157,7 +171,7 @@ final class BodyTracker: NSObject, ObservableObject, ARSessionDelegate {
             config.videoFormat = chosen
         }
         videoFormatText = BodyTracker.describe(config.videoFormat)
-        view.session.run(config, options: [.resetTracking, .removeExistingAnchors])
+        session.run(config, options: [.resetTracking, .removeExistingAnchors])
     }
 
     private static func describe(_ f: ARConfiguration.VideoFormat) -> String {
@@ -192,7 +206,7 @@ final class BodyTracker: NSObject, ObservableObject, ARSessionDelegate {
             }
         }
 
-        updateVisuals(tracked ? body : nil)
+        if showVisuals { updateVisuals(tracked ? body : nil) }
         if tracked != bodyTracked { bodyTracked = tracked }
 
         frameCount += 1
@@ -216,16 +230,17 @@ final class BodyTracker: NSObject, ObservableObject, ARSessionDelegate {
     // MARK: - 내부
 
     private func updateVisuals(_ body: ARBodyAnchor?) {
+        let nodes = visualRoot.childNodes
         guard let body else {
-            for entity in jointEntities where entity.isEnabled { entity.isEnabled = false }
+            for node in nodes where !node.isHidden { node.isHidden = true }
             return
         }
         let models = body.skeleton.jointModelTransforms
-        for (i, idx) in jointIndices.enumerated() where i < jointEntities.count {
+        for (i, idx) in jointIndices.enumerated() where i < nodes.count {
             guard idx != NSNotFound, idx < models.count else { continue }
             let m = body.transform * models[idx]
-            jointEntities[i].position = SIMD3<Float>(m.columns.3.x, m.columns.3.y, m.columns.3.z)
-            if !jointEntities[i].isEnabled { jointEntities[i].isEnabled = true }
+            nodes[i].simdPosition = SIMD3<Float>(m.columns.3.x, m.columns.3.y, m.columns.3.z)
+            if nodes[i].isHidden { nodes[i].isHidden = false }
         }
     }
 

@@ -1,16 +1,29 @@
-import RealityKit
+import ARKit
+import SceneKit
 import SwiftUI
 
-struct ARViewContainer: UIViewRepresentable {
+/// 카메라 미리보기. 트래커의 AR 세션을 빌려 쓰고, 렌더링은 30fps로 제한해 발열을 줄인다.
+struct ARPreview: UIViewRepresentable {
     let tracker: BodyTracker
 
-    func makeUIView(context: Context) -> ARView {
-        let view = ARView(frame: .zero, cameraMode: .ar, automaticallyConfigureSession: false)
-        tracker.attach(view)
+    func makeUIView(context: Context) -> ARSCNView {
+        let view = ARSCNView(frame: .zero)
+        view.session = tracker.session
+        view.scene = SCNScene()
+        view.scene.rootNode.addChildNode(tracker.visualRoot)
+        view.preferredFramesPerSecond = 30
+        view.rendersCameraGrain = false
+        view.rendersMotionBlur = false
+        view.automaticallyUpdatesLighting = false
+        tracker.showVisuals = true
         return view
     }
 
-    func updateUIView(_ uiView: ARView, context: Context) {}
+    func updateUIView(_ uiView: ARSCNView, context: Context) {}
+
+    static func dismantleUIView(_ uiView: ARSCNView, coordinator: ()) {
+        uiView.scene.rootNode.childNodes.forEach { $0.removeFromParentNode() }
+    }
 }
 
 /// 반투명 검은 패널 위에서 잘 보이는 입력칸 (시스템 라이트/다크 모드와 무관).
@@ -35,13 +48,26 @@ struct ContentView: View {
     @AppStorage("autoDiscover") private var autoDiscover = true
     @AppStorage("lowResCamera") private var lowResCamera = true
     @State private var showSettings = false
+    @State private var powerSave = false
+    @State private var savedBrightness: CGFloat = 0.5
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         if tracker.isSupported {
             ZStack(alignment: .top) {
-                ARViewContainer(tracker: tracker)
-                    .ignoresSafeArea()
+                if powerSave {
+                    powerSaveScreen
+                } else {
+                    ARPreview(tracker: tracker)
+                        .ignoresSafeArea()
+                        .onDisappear {
+                            tracker.showVisuals = false
+                            // 미리보기가 세션을 멈췄을 수 있으니 이어서 실행한다
+                            DispatchQueue.main.async { tracker.ensureRunning() }
+                        }
+                }
 
+                if !powerSave {
                 VStack(spacing: 8) {
                     statusBar
                     if !tracker.pcConnected, let problem = tracker.problemText {
@@ -61,10 +87,12 @@ struct ContentView: View {
                     }
                 }
                 .padding(12)
+                }
             }
             .onAppear {
                 UIApplication.shared.isIdleTimerDisabled = true
                 tracker.setLowResCamera(lowResCamera)
+                tracker.start()
                 apply()
                 // 3초 안에 PC를 못 찾으면 설정을 한 번 열어 준다. 입력 중에는 닫히지 않는다 ("닫기"로만 닫힘).
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
@@ -76,6 +104,10 @@ struct ContentView: View {
             .onChange(of: sendEnabled) { _ in apply() }
             .onChange(of: autoDiscover) { _ in apply() }
             .onChange(of: lowResCamera) { value in tracker.setLowResCamera(value) }
+            .onChange(of: scenePhase) { phase in
+                // 절전 모드로 낮춘 밝기가 다른 앱에 남지 않게 한다
+                if phase != .active { setPowerSave(false) }
+            }
         } else {
             VStack(spacing: 12) {
                 Image(systemName: "exclamationmark.triangle").font(.largeTitle)
@@ -84,6 +116,39 @@ struct ContentView: View {
             }
             .padding()
         }
+    }
+
+    private func setPowerSave(_ on: Bool) {
+        guard on != powerSave else { return }
+        if on {
+            savedBrightness = UIScreen.main.brightness
+            showSettings = false
+            UIScreen.main.brightness = 0
+        } else {
+            UIScreen.main.brightness = savedBrightness
+        }
+        powerSave = on
+    }
+
+    /// 화면을 검게 하고 밝기를 최저로 낮춘다. 트래킹과 전송은 계속된다.
+    private var powerSaveScreen: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            VStack(spacing: 14) {
+                Image(systemName: "moon.fill").font(.largeTitle)
+                Text("절전 모드 — 트래킹은 계속 전송 중").font(.headline)
+                HStack(spacing: 12) {
+                    indicator(tracker.pcConnected, on: "PC 연결", off: "PC 없음")
+                    indicator(tracker.bodyTracked, on: "몸 인식", off: "몸 없음")
+                }
+                Text(String(format: "%.0f fps · 발열 %@", tracker.fps, tracker.thermalText))
+                    .font(.caption.monospacedDigit())
+                Text("화면을 두 번 탭하면 돌아갑니다").font(.caption2).foregroundColor(.gray)
+            }
+            .foregroundColor(.white.opacity(0.6))
+        }
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { setPowerSave(false) }
     }
 
     private func apply() {
@@ -98,6 +163,11 @@ struct ContentView: View {
                 Text("VRChat ▶").font(.caption.bold()).foregroundColor(.green)
             }
             Spacer(minLength: 4)
+            Button {
+                setPowerSave(true)
+            } label: {
+                Image(systemName: "moon.fill").font(.title3)
+            }
             VStack(alignment: .trailing, spacing: 1) {
                 Text(String(format: "%.0f fps / 몸 %.0f", tracker.fps, tracker.bodyFps))
                 if tracker.pcConnected {
