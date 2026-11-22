@@ -29,8 +29,9 @@ class Advertiser:
             f"{self.name}.{SERVICE_TYPE}",
             port=self.port,
             addresses=[socket.inet_aton(a) for a in self.addresses],
-            properties={"v": "1"},
-            server=f"{socket.gethostname()}-arkitfbt.local.",
+            # iPhone은 이름 해석 없이 TXT의 ip/port로 바로 연결한다
+            properties={"v": "1", "ip": self.addresses[0], "port": str(self.port)},
+            server=f"{safe_hostname(socket.gethostname())}-arkitfbt.local.",
         )
         self._zc = Zeroconf(ip_version=IPVersion.V4Only)
         self._zc.register_service(self._info, allow_name_change=True)
@@ -44,6 +45,14 @@ class Advertiser:
         finally:
             self._zc.close()
             self._zc = None
+
+
+def safe_hostname(name: str) -> str:
+    """DNS 호스트 이름에 쓸 수 있는 문자만 남긴다 (밑줄 등은 iOS가 해석하지 못할 수 있다)."""
+    out = "".join(c if c.isascii() and c.isalnum() else "-" for c in name.lower()).strip("-")
+    while "--" in out:
+        out = out.replace("--", "-")
+    return out or "pc"
 
 
 def lan_addresses(addresses: list[str]) -> list[str]:

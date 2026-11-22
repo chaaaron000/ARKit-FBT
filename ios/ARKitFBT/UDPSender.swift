@@ -34,6 +34,17 @@ final class UDPSender {
         }
     }
 
+    static func short(_ endpoint: NWEndpoint) -> String {
+        switch endpoint {
+        case let .hostPort(host, port):
+            return "\(host):\(port)"
+        case let .service(name, _, _, _):
+            return "Bonjour: \(name)"
+        default:
+            return "\(endpoint)"
+        }
+    }
+
     static func describe(_ path: NWPath) -> String? {
         if path.status != .satisfied {
             if #available(iOS 14.2, *), path.unsatisfiedReason == .localNetworkDenied {
@@ -100,8 +111,11 @@ final class UDPSender {
             DispatchQueue.main.async {
                 guard let self, let conn, conn === self.connection else { return }
                 switch state {
+                case .preparing:
+                    self.onState?("연결 준비 중… (\(UDPSender.short(target)))")
                 case .ready:
-                    self.onState?("연결 준비됨")
+                    let remote = conn.currentPath?.remoteEndpoint.map(UDPSender.short) ?? UDPSender.short(target)
+                    self.onState?("보내는 중 → \(remote)")
                 case .waiting(let error):
                     self.onState?("대기 중: " + UDPSender.explain(error))
                 case .failed(let error):
@@ -179,7 +193,8 @@ final class RelayBrowser {
     }
 
     var onChange: (([Found]) -> Void)?
-    var onState: ((String) -> Void)?
+    /// 자동 찾기 문제 문구 (nil = 정상)
+    var onState: ((String?) -> Void)?
     private var browser: NWBrowser?
 
     var isRunning: Bool { browser != nil }
@@ -188,12 +203,19 @@ final class RelayBrowser {
         guard browser == nil else { return }
         let params = NWParameters()
         params.includePeerToPeer = false
-        let b = NWBrowser(for: .bonjour(type: RelayBrowser.serviceType, domain: nil), using: params)
+        let b = NWBrowser(for: .bonjourWithTXTRecord(type: RelayBrowser.serviceType, domain: nil), using: params)
         b.browseResultsChangedHandler = { [weak self] results, _ in
             let found = results.compactMap { result -> Found? in
                 guard case let .service(name, _, _, _) = result.endpoint else { return nil }
+                // PC가 TXT에 실어 보낸 IP/포트로 바로 연결한다 (호스트 이름 해석을 거치지 않음)
+                if case let .bonjour(txt) = result.metadata,
+                   let ip = txt["ip"], let portText = txt["port"],
+                   let portValue = UInt16(portText), let port = NWEndpoint.Port(rawValue: portValue) {
+                    return Found(name: name, endpoint: .hostPort(host: NWEndpoint.Host(ip), port: port))
+                }
                 return Found(name: name, endpoint: result.endpoint)
             }.sorted { $0.name < $1.name }
+            self?.onState?(nil)
             self?.onChange?(found)
         }
         b.stateUpdateHandler = { [weak self, weak b] state in
