@@ -42,6 +42,7 @@ class Snapshot:
     yaw_aligned_at: float | None = None
     last_yaw: float | None = None
     lean_deg: float | None = None
+    gated: list[str] = field(default_factory=list)
     gesture_progress: float = 0.0
     osc_sent: int = 0
     osc_errors: int = 0
@@ -189,6 +190,7 @@ class Engine:
                 yaw_aligned_at=self._yaw_aligned_at,
                 last_yaw=self._last_yaw,
                 lean_deg=self.processor.lean_deg,
+                gated=sorted(self.processor.gated) if alive else [],
                 gesture_progress=self._gesture_progress,
                 osc_sent=self.osc.sent,
                 osc_errors=self.osc.errors,

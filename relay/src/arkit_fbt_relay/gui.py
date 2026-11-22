@@ -112,6 +112,7 @@ class MainWindow(QtWidgets.QMainWindow):
             ("ip", "이 PC 주소"), ("phone", "iPhone"), ("rate", "수신 속도"),
             ("jitter", "수신 간격 흔들림"), ("lost", "손실 / 오류"), ("tracked", "몸 인식"),
             ("facing", "카메라 정면"), ("yaw", "방향 정렬"), ("lean", "자세 기울기 보정"),
+            ("gate", "불안정해서 고정 중"),
             ("gesture", "손 들기 제스처"),
             ("osc", "VRChat 전송"),
         ]
@@ -186,6 +187,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return cb
 
         check("osc_enabled", "VRChat으로 전송")
+        check("quality_gate", "불안정할 때 고정 (ARKit이 몸을 놓치면 마지막 안정 자세 유지)")
         check("upright_correction", "자세 기울기 보정 (카메라 쪽으로 기우는 오차 제거)")
         check("flat_feet", "발·무릎을 평평하게 (ARKit 발 각도 무시, 몸 방향만 따름)")
         check("send_head_position", "머리 위치 전송 (VRChat 자동 위치 정렬)", "끄면 트래커가 따로 놉니다")
@@ -312,6 +314,11 @@ class MainWindow(QtWidgets.QMainWindow):
             mark(st["yaw"], True, f"{snap.last_yaw:.0f}° ({ago:.0f}초 전)")
         else:
             mark(st["yaw"], False, "아직 안 함")
+        names = {j: label for _i, _n, j, label in TRACKERS}
+        names.update({"head_joint": "머리", "neck_1_joint": "목", "spine_7_joint": "가슴",
+                      "left_upLeg_joint": "왼허벅지", "right_upLeg_joint": "오른허벅지"})
+        gated = [names.get(g, g) for g in snap.gated]
+        mark(st["gate"], not gated, ", ".join(gated) if gated else "없음")
         if snap.lean_deg is not None:
             mark(st["lean"], True, f"{snap.lean_deg:.1f}° 바로 세우는 중")
         else:

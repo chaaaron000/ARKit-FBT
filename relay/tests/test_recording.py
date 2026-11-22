@@ -32,7 +32,8 @@ def test_record_roundtrip_and_analyze(tmp_path):
 def test_prediction_leads_motion():
     def run(pred):
         # 기본값과 무관하게, 지연이 뚜렷한 필터 설정으로 고정한다
-        p = Processor(Settings(min_cutoff=1.5, beta=0.7, prediction_ms=pred))
+        # 절대 위치 모드(머리 정렬 끔)에서 골반 필터의 지연을 본다
+        p = Processor(Settings(min_cutoff=1.5, beta=0.7, prediction_ms=pred, send_head_position=False))
         for i in range(60):
             t = i / 60
             j = synth_joints(0.0)

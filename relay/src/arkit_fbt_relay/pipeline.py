@@ -40,6 +40,9 @@ HEAD_JOINT = "head_joint"
 ANCHOR_JOINT = "hips_joint"
 # 회전을 몸 방향(yaw)만으로 만드는 트래커
 FLAT_TRACKERS = {"left_foot", "right_foot", "left_knee", "right_knee"}
+# 품질 게이트를 적용하는 관절 (트래커 관절 + 머리 위치 계산 + 몸 방향 계산에 쓰는 것)
+GATED_JOINTS = tuple(sorted({j for _, _, j, _ in TRACKERS if j != ANCHOR_JOINT}
+                            | {HEAD_JOINT, "neck_1_joint", "spine_7_joint", "left_upLeg_joint", "right_upLeg_joint"}))
 
 UP = np.array([0.0, 1.0, 0.0])
 MAX_LEAN_DEG = 35.0
@@ -62,6 +65,12 @@ class Settings:
     max_speed: float = 20.0
     # 골반 기준으로 관절이 움직일 수 있는 최대 속도 (m/s). 넘는 만큼은 잘라서 튐을 누른다.
     max_rel_speed: float = 3.0
+    # 품질 게이트: 최근 gate_window 초 동안 추적 비율이 낮거나 원본이 심하게 흔들리면
+    # 그 관절은 마지막 안정 위치로 고정한다 (ARKit이 몸을 못 보는 구간에서 출렁임 방지).
+    quality_gate: bool = True
+    gate_window: float = 0.5
+    gate_min_tracked: float = 0.8
+    gate_max_jitter: float = 0.025  # 원본 상대 위치의 프레임간 변화 중앙값 (m)
     # 지연을 줄이기 위해 속도 방향으로 미리 내다보는 시간 (ms). 크면 동작이 튀어나간다.
     prediction_ms: float = 0.0
     upright_correction: bool = True
@@ -135,6 +144,8 @@ class Processor:
     CAMERA_JUMP_POS = 0.05  # m / frame
     CAMERA_JUMP_ROT = math.radians(3.0)  # rad / frame
     MAX_PREDICTION = 0.15  # m
+    REENTRY_SEC = 0.4  # 고정이 풀린 뒤 천천히 옮겨가는 시간
+    REENTRY_SPEED = 0.6  # 그동안의 최대 상대 속도 (m/s)
 
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -177,6 +188,9 @@ class Processor:
         self._last_forward: np.ndarray | None = None
         self._axis_hips: np.ndarray | None = None
         self._axis_hips_t: float | None = None
+        self._qhist: dict[str, deque[tuple[float, np.ndarray | None]]] = {}
+        self._held_at: dict[str, float] = {}
+        self.gated: set[str] = set()
 
     def apply_filter_settings(self) -> None:
         """설정은 매 프레임 필터에 반영되므로 따로 할 일이 없다 (호환용)."""
@@ -304,6 +318,18 @@ class Processor:
         depth = depth / dn if dn > 1e-6 else np.array([0.0, 0.0, -1.0])
         pred = s.prediction_ms / 1000.0
         anchor = self._filter_anchor(hips, t, depth, pred)
+        if s.send_head_position:
+            # VRChat은 머리 위치로 공간을 맞추므로 절대 위치는 의미가 없다. 머리·트래커 메시지가
+            # 같은 프레임에 처리되지 않아도 어긋나지 않도록 기준점을 아주 느리게 움직인다.
+            anchor = self._axis_hips.copy()
+
+        # 품질 게이트용 기록: 관절별 (시각, 골반 기준 원본 상대 위치 또는 None=추적 안 됨)
+        self.gated = set()
+        for name in GATED_JOINTS:
+            h = self._qhist.get(name)
+            if h is None:
+                h = self._qhist[name] = deque(maxlen=90)
+            h.append((t, world[name][0] - hips if name in world else None))
 
         cache: dict[str, np.ndarray | None] = {}
 
@@ -315,8 +341,11 @@ class Processor:
         def _joint_pos(name: str) -> np.ndarray | None:
             if name == ANCHOR_JOINT:
                 return anchor
-            if name not in world:
-                held = self._rel_out.get(name)  # 추적이 끊김: 마지막 정상 상대 위치 유지
+            if name not in world or not self._quality_ok(name, t):
+                if name in world:
+                    self.gated.add(name)
+                self._held_at[name] = t
+                held = self._rel_out.get(name)  # 추적이 끊김/불안정: 마지막 안정 상대 위치 유지
                 return None if held is None else anchor + held
             rel = world[name][0] - hips
             ds = self._despike.get(name)
@@ -331,9 +360,10 @@ class Processor:
             self._rel_out[name] = r
             return anchor + r
 
-        if out.forward is not None:
+        forward_ok = all(self._quality_ok(n, t) for n in ("left_upLeg_joint", "right_upLeg_joint"))
+        if out.forward is not None and forward_ok:
             self._last_forward = out.forward
-        else:
+        elif self._last_forward is not None:
             out.forward = self._last_forward
         yaw_q = None
         if out.forward is not None:
@@ -374,17 +404,43 @@ class Processor:
         self._last_out = out
         return out
 
+    def _quality_ok(self, name: str, t: float) -> bool:
+        """최근 gate_window 초 동안 이 관절이 충분히 추적됐고 원본이 심하게 흔들리지 않았는가."""
+        s = self.settings
+        if not s.quality_gate:
+            return True
+        h = self._qhist.get(name)
+        if not h:
+            return True
+        window = [r for (ht, r) in h if t - ht <= s.gate_window]
+        if len(window) < 3:
+            return True
+        tracked = [r for r in window if r is not None]
+        if len(tracked) / len(window) < s.gate_min_tracked:
+            return False
+        if len(tracked) >= 4:
+            steps = np.linalg.norm(np.diff(np.array(tracked), axis=0), axis=1)
+            if float(np.median(steps)) > s.gate_max_jitter:
+                return False
+        return True
+
     def _slew_limit(self, name: str, rel: np.ndarray, t: float) -> np.ndarray:
         """골반 기준 상대 위치가 물리적으로 불가능하게 빨리 변하면 그만큼 잘라낸다."""
         s = self.settings
         prev = self._slew.get(name)
-        if prev is not None and s.max_rel_speed > 0:
+        # 고정(유지)이 풀린 직후에는 새 위치로 천천히 옮겨 계단식 점프를 막는다
+        held_at = self._held_at.get(name)
+        reentry = held_at is not None and t - held_at < self.REENTRY_SEC
+        speed = s.max_rel_speed
+        if reentry:
+            speed = self.REENTRY_SPEED if speed <= 0 else min(speed, self.REENTRY_SPEED)
+        if prev is not None and speed > 0:
             pt, pr = prev
             dt = t - pt
-            if 0 < dt < 0.5:
+            if dt > 0:
                 d = rel - pr
                 n = float(np.linalg.norm(d))
-                lim = s.max_rel_speed * dt
+                lim = speed * min(dt, 0.1)
                 if n > lim:
                     rel = pr + d * (lim / n)
         self._slew[name] = (t, rel)
